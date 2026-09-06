@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'; // Ci serve per bloccare l'inserimento di lettere nei campi numerici
+import 'package:flutter/services.dart';
 
 class PaginaMacchinari extends StatefulWidget {
   const PaginaMacchinari({super.key});
@@ -9,15 +9,15 @@ class PaginaMacchinari extends StatefulWidget {
 }
 
 class _PaginaMacchinariState extends State<PaginaMacchinari> {
-  // Il nostro riepilogo visivo dei macchinari
+  // Il nostro riepilogo visivo (Aggiornato per ricordare anche i numeri grezzi della capacità e temperatura)
   final List<Map<String, dynamic>> _listaMacchinari = [
-    {"nome": "Impastatrice a spirale", "tipo": "Impastatrice", "dettagli": "Capacità: 50 kg"},
-    {"nome": "Forno a piani", "tipo": "Forno", "dettagli": "Capacità: 8 teglie | Temp Max: 250°C"},
+    {"nome": "Impastatrice a spirale", "tipo": "Impastatrice", "capacita": "50", "temperatura": "", "dettagli": "Capacità: 50 kg"},
+    {"nome": "Forno a piani", "tipo": "Forno", "capacita": "8", "temperatura": "250", "dettagli": "Capacità: 8 teglie | Temp Max: 250°C"},
   ];
-// Variabile per ricordare il filtro attuale
+
   String _criterioOrdinamento = 'Nome (A-Z)';
 
-  // 1. Funzione per ordinare la lista dei macchinari (blindata contro le maiuscole/minuscole)
+  // Funzione per ordinare la lista
   void _ordinaMacchinari(String nuovoCriterio) {
     setState(() {
       _criterioOrdinamento = nuovoCriterio;
@@ -29,36 +29,41 @@ class _PaginaMacchinariState extends State<PaginaMacchinari> {
     });
   }
 
-  // 2. Funzione per assegnare un colore logico in base alla funzione della macchina
+  // Funzione per i colori semantici
   Color _colorePerTipo(String tipo) {
     if (tipo == 'Forno') return Colors.red.shade600;
     if (tipo == 'Impastatrice') return Colors.blue.shade600;
     if (tipo == 'Cella di lievitazione') return Colors.teal.shade600;
     if (tipo == 'Banco di lavoro') return Colors.brown.shade600;
-    return Colors.blueGrey; // Colore di default nel caso ci siano altre macchine
+    return Colors.blueGrey; 
   }
 
-  // Funzione che apre la finestra per aggiungere un macchinario
-  void _apriFinestraAggiunta() {
-    String tipoSelezionato = 'Forno';
-    final TextEditingController nomeController = TextEditingController();
-    final TextEditingController capacitaController = TextEditingController();
-    final TextEditingController temperaturaController = TextEditingController();
+  // --- LA MAGIA: LA FINESTRA INTELLIGENTE (AGGIUNGI O MODIFICA) ---
+  void _apriFinestraMacchinario({int? indiceDaModificare}) {
+    // 1. Capiamo se stiamo modificando o creando da zero
+    bool inModifica = indiceDaModificare != null;
+    final macchinaEsistente = inModifica ? _listaMacchinari[indiceDaModificare] : null;
+
+    // 2. Pre-compiliamo i campi se stiamo modificando!
+    String tipoSelezionato = inModifica ? macchinaEsistente!['tipo'] : 'Forno';
+    final TextEditingController nomeController = TextEditingController(text: inModifica ? macchinaEsistente!['nome'] : '');
+    final TextEditingController capacitaController = TextEditingController(text: inModifica ? macchinaEsistente!['capacita'] : '');
+    final TextEditingController temperaturaController = TextEditingController(text: inModifica ? macchinaEsistente!['temperatura'] : '');
 
     showDialog(
       context: context,
       builder: (context) {
-        // StatefulBuilder serve a far aggiornare SOLO la finestrella in tempo reale
-        // quando cambiamo il tipo di macchinario dal menu a tendina.
         return StatefulBuilder(
           builder: (context, setStateDialog) {
             return AlertDialog(
-              title: const Text('Aggiungi Macchinario', style: TextStyle(fontWeight: FontWeight.bold)),
+              title: Text(
+                inModifica ? 'Modifica Macchinario' : 'Aggiungi Macchinario', 
+                style: const TextStyle(fontWeight: FontWeight.bold)
+              ),
               content: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // 1. SCELTA DEL TIPO
                     DropdownButtonFormField<String>(
                       value: tipoSelezionato,
                       decoration: const InputDecoration(labelText: 'Che macchina è?'),
@@ -73,7 +78,6 @@ class _PaginaMacchinariState extends State<PaginaMacchinari> {
                     ),
                     const SizedBox(height: 15),
 
-                    // 2. NOME DELLA MACCHINA (Es. Forno 1)
                     TextField(
                       controller: nomeController,
                       decoration: const InputDecoration(
@@ -83,7 +87,7 @@ class _PaginaMacchinariState extends State<PaginaMacchinari> {
                     ),
                     const SizedBox(height: 15),
 
-                    // 3. CAMPI DINAMICI DA ESPERTO PANETTIERE
+                    // CAMPI DINAMICI
                     if (tipoSelezionato == 'Forno') ...[
                       _creaCampoNumerico(capacitaController, 'Quante teglie contiene?'),
                       const SizedBox(height: 10),
@@ -103,12 +107,11 @@ class _PaginaMacchinariState extends State<PaginaMacchinari> {
               ),
               actions: [
                 TextButton(
-                  onPressed: () => Navigator.pop(context), // Chiude senza salvare
+                  onPressed: () => Navigator.pop(context), 
                   child: const Text('Annulla', style: TextStyle(color: Colors.red)),
                 ),
                 ElevatedButton(
                   onPressed: () {
-                    // Logica di salvataggio nel riepilogo
                     if (nomeController.text.isNotEmpty) {
                       String dettagli = "";
                       if (tipoSelezionato == 'Forno') {
@@ -122,17 +125,31 @@ class _PaginaMacchinariState extends State<PaginaMacchinari> {
                       }
 
                       setState(() {
-                        _listaMacchinari.add({
+                        // Creiamo il pacchetto dati
+                        final pacchettoDati = {
                           "nome": nomeController.text,
                           "tipo": tipoSelezionato,
                           "dettagli": dettagli,
-                        });
+                          "capacita": capacitaController.text,
+                          "temperatura": temperaturaController.text,
+                        };
+
+                        if (inModifica) {
+                          // Se in modifica, sostituiamo i vecchi dati con quelli aggiornati
+                          _listaMacchinari[indiceDaModificare!] = pacchettoDati;
+                        } else {
+                          // Altrimenti aggiungiamo una nuova macchina
+                          _listaMacchinari.add(pacchettoDati);
+                        }
+                        
+                        // Riapplichiamo il filtro corrente
+                        _ordinaMacchinari(_criterioOrdinamento);
                       });
-                      Navigator.pop(context); // Chiude la finestra dopo il salvataggio
+                      Navigator.pop(context); 
                     }
                   },
                   style: ElevatedButton.styleFrom(backgroundColor: Colors.blueGrey),
-                  child: const Text('Aggiungi al Laboratorio', style: TextStyle(color: Colors.white)),
+                  child: Text(inModifica ? 'Salva Modifiche' : 'Aggiungi al Laboratorio', style: const TextStyle(color: Colors.white)),
                 ),
               ],
             );
@@ -142,7 +159,6 @@ class _PaginaMacchinariState extends State<PaginaMacchinari> {
     );
   }
 
-  // Sotto-funzione per creare i campi numerici "blindati" contro le lettere
   Widget _creaCampoNumerico(TextEditingController controller, String etichetta) {
     return TextField(
       controller: controller,
@@ -155,7 +171,7 @@ class _PaginaMacchinariState extends State<PaginaMacchinari> {
     );
   }
 
- @override
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
@@ -167,10 +183,10 @@ class _PaginaMacchinariState extends State<PaginaMacchinari> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // --- 1. PULSANTE IN ALTO CENTRALE ---
             Center(
               child: ElevatedButton.icon(
-                onPressed: _apriFinestraAggiunta,
+                // Qui passiamo NESSUN INDICE: quindi la finestra si aprirà VUOTA per CREARE
+                onPressed: () => _apriFinestraMacchinario(),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.blueGrey.shade100,
                   foregroundColor: Colors.blueGrey.shade900,
@@ -184,13 +200,11 @@ class _PaginaMacchinariState extends State<PaginaMacchinari> {
             
             const Divider(height: 40, thickness: 2),
 
-            // --- 2. TITOLO E FILTRO DI ORDINAMENTO ---
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 const Text('Attrezzature in Laboratorio:', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
                 
-                // Il nostro Menu a tendina
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10),
                   decoration: BoxDecoration(
@@ -221,7 +235,6 @@ class _PaginaMacchinariState extends State<PaginaMacchinari> {
             
             const SizedBox(height: 15),
             
-            // --- 3. LISTA DELLE SCHEDE COLORATE ---
             Expanded(
               child: _listaMacchinari.isEmpty
                   ? const Center(
@@ -232,8 +245,6 @@ class _PaginaMacchinariState extends State<PaginaMacchinari> {
                       itemCount: _listaMacchinari.length,
                       itemBuilder: (context, index) {
                         final macchina = _listaMacchinari[index];
-                        
-                        // Chiamiamo la funzione per calcolare il colore corretto in base alla macchina!
                         final coloreMacchina = _colorePerTipo(macchina['tipo']);
                         
                         return Card(
@@ -245,7 +256,6 @@ class _PaginaMacchinariState extends State<PaginaMacchinari> {
                           ),
                           child: ListTile(
                             leading: Icon(
-                              // Manteniamo le icone dedicate
                               macchina['tipo'] == 'Forno' ? Icons.local_fire_department : 
                               macchina['tipo'] == 'Impastatrice' ? Icons.sync : 
                               macchina['tipo'] == 'Cella di lievitazione' ? Icons.ac_unit : Icons.build,
@@ -255,13 +265,26 @@ class _PaginaMacchinariState extends State<PaginaMacchinari> {
                               style: TextStyle(fontWeight: FontWeight.bold, color: coloreMacchina, fontSize: 18)
                             ),
                             subtitle: Text("${macchina['tipo']} - ${macchina['dettagli']}", style: const TextStyle(fontSize: 16)),
-                            trailing: IconButton(
-                              icon: const Icon(Icons.delete, color: Colors.red),
-                              onPressed: () {
-                                setState(() {
-                                  _listaMacchinari.removeAt(index);
-                                });
-                              },
+                            
+                            // ECCO LA NOVITÀ: IL DOPPIO BOTTONE!
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min, // Impedisce che la Row occupi troppo spazio causando errori visivi
+                              children: [
+                                // Bottone Modifica (Matita Arancione)
+                                IconButton(
+                                  icon: const Icon(Icons.edit, color: Colors.orange),
+                                  onPressed: () => _apriFinestraMacchinario(indiceDaModificare: index),
+                                ),
+                                // Bottone Elimina (Cestino Rosso)
+                                IconButton(
+                                  icon: const Icon(Icons.delete, color: Colors.red),
+                                  onPressed: () {
+                                    setState(() {
+                                      _listaMacchinari.removeAt(index);
+                                    });
+                                  },
+                                ),
+                              ],
                             ),
                           ),
                         );

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 class PaginaNuovaRicettaManuale extends StatefulWidget {
-  // Aggiungiamo una "scatola" opzionale che può ricevere i dati da modificare
+  // 1. La scatola che riceve la ricetta da modificare (può essere nulla se stiamo creando da zero)
   final Map<String, dynamic>? ricettaDaModificare;
 
   const PaginaNuovaRicettaManuale({super.key, this.ricettaDaModificare});
@@ -20,42 +20,41 @@ class _PaginaNuovaRicettaManualeState extends State<PaginaNuovaRicettaManuale> {
   final List<Map<String, dynamic>> _ingredienti = [];
   final List<Map<String, dynamic>> _fasi = [];
 
-// --- LA MAGIA DELL'INIZIALIZZAZIONE (PRE-COMPILAZIONE) ---
+  // --- LA MAGIA: PRE-COMPILIAMO I CAMPI ALL'AVVIO ---
   @override
   void initState() {
     super.initState();
     
-    // Quando la pagina si apre, controlliamo se ci è stata passata una ricetta
+    // Controlliamo se ci è stata passata una ricetta
     if (widget.ricettaDaModificare != null) {
       
-      // 1. Pre-compiliamo il nome
       _nomeController.text = widget.ricettaDaModificare!['nome'] ?? '';
       
-      // 2. Travasiamo gli ingredienti (se esistono)
+      if (widget.ricettaDaModificare!['resa_quantita'] != null) {
+        _resaQuantitaController.text = widget.ricettaDaModificare!['resa_quantita'].toString();
+      }
+      if (widget.ricettaDaModificare!['resa_unita'] != null) {
+        _resaUnita = widget.ricettaDaModificare!['resa_unita'];
+      }
+
       if (widget.ricettaDaModificare!['lista_ingredienti'] != null) {
-        // TRUCCO DA ESPERTO: Usiamo List.from per fare una "copia" della lista.
-        // In questo modo, se cancelli un ingrediente nel modulo, non lo elimini dal database originale 
-        // finché non premi il grande bottone finale "Salva Ricetta"!
-        _ingredienti.addAll(List<Map<String, dynamic>>.from(widget.ricettaDaModificare!['lista_ingredienti']));
+        _ingredienti.addAll(List<Map<String, dynamic>>.from(
+          widget.ricettaDaModificare!['lista_ingredienti'].map((e) => Map<String, dynamic>.from(e))
+        ));
       }
       
-      // 3. Travasiamo le fasi (se esistono)
       if (widget.ricettaDaModificare!['lista_fasi'] != null) {
-        _fasi.addAll(List<Map<String, dynamic>>.from(widget.ricettaDaModificare!['lista_fasi']));
+        _fasi.addAll(List<Map<String, dynamic>>.from(
+          widget.ricettaDaModificare!['lista_fasi'].map((e) => Map<String, dynamic>.from(e))
+        ));
       }
     }
   }
 
   // --- AZIONI PER GLI INGREDIENTI ---
- 
-  // --- AZIONI PER GLI INGREDIENTI ---
   void _aggiungiIngrediente() {
     setState(() {
-      _ingredienti.add({
-        'nome': '',
-        'quantita': '',
-        'unita': 'g', 
-      });
+      _ingredienti.add({'nome': '', 'quantita': '', 'unita': 'g'});
     });
   }
 
@@ -65,14 +64,10 @@ class _PaginaNuovaRicettaManualeState extends State<PaginaNuovaRicettaManuale> {
     });
   }
 
-  // --- NUOVE AZIONI PER LE FASI ---
+  // --- AZIONI PER LE FASI ---
   void _aggiungiFase() {
     setState(() {
-      _fasi.add({
-        'nome_fase': '',
-        'macchinario': 'Banco di lavoro', // Partiamo dal banco come default
-        'tempo_minuti': '',
-      });
+      _fasi.add({'nome_fase': '', 'macchinario': 'Banco di lavoro', 'tempo_minuti': ''});
     });
   }
 
@@ -82,46 +77,32 @@ class _PaginaNuovaRicettaManualeState extends State<PaginaNuovaRicettaManuale> {
     });
   }
 
-  // --- MODULO 1: NOME DELLA RICETTA ---
+  // --- MODULI GRAFICI ---
   Widget _costruisciSezioneNome() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          'Dettagli Principali',
-          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.orange),
-        ),
+        const Text('Dettagli Principali', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.orange)),
         const SizedBox(height: 15),
         TextField(
           controller: _nomeController,
           decoration: InputDecoration(
-            labelText: 'Nome della Ricetta (es. Ciabatta Artigianale)',
+            labelText: 'Nome della Ricetta',
             prefixIcon: const Icon(Icons.bakery_dining),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-            ),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
           ),
         ),
       ],
     );
   }
 
- // --- MODULO 2: LA LISTA DEGLI INGREDIENTI (CON RESA) ---
   Widget _costruisciSezioneIngredienti() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          'Ingredienti e Resa',
-          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.orange),
-        ),
-        const Text(
-          'Indica per quanto prodotto finito sono calcolati questi ingredienti.',
-          style: TextStyle(color: Colors.grey),
-        ),
+        const Text('Ingredienti e Resa', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.orange)),
         const SizedBox(height: 15),
 
-        // --- NUOVO: SEZIONE RESA STIMATA ---
         Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
@@ -138,29 +119,17 @@ class _PaginaNuovaRicettaManualeState extends State<PaginaNuovaRicettaManuale> {
                   controller: _resaQuantitaController,
                   keyboardType: TextInputType.number,
                   inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                  decoration: const InputDecoration(
-                    hintText: 'Es. 10',
-                    isDense: true,
-                    contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 12),
-                    border: OutlineInputBorder(),
-                    filled: true,
-                    fillColor: Colors.white,
-                  ),
+                  decoration: const InputDecoration(hintText: 'Es. 10', isDense: true, border: OutlineInputBorder(), filled: true, fillColor: Colors.white),
                 ),
               ),
               const SizedBox(width: 10),
               DropdownButton<String>(
                 value: _resaUnita,
                 items: ['Kg', 'g', 'Pz'].map((String unita) {
-                  return DropdownMenuItem<String>(
-                    value: unita,
-                    child: Text(unita, style: const TextStyle(fontWeight: FontWeight.bold)),
-                  );
+                  return DropdownMenuItem<String>(value: unita, child: Text(unita, style: const TextStyle(fontWeight: FontWeight.bold)));
                 }).toList(),
                 onChanged: (nuovoValore) {
-                  setState(() {
-                    _resaUnita = nuovoValore!;
-                  });
+                  setState(() { _resaUnita = nuovoValore!; });
                 },
               ),
             ],
@@ -169,7 +138,6 @@ class _PaginaNuovaRicettaManualeState extends State<PaginaNuovaRicettaManuale> {
         
         const SizedBox(height: 20),
 
-       // La lista che si allunga da sola (Ora con initialValue!)
         ListView.builder(
           shrinkWrap: true, 
           physics: const NeverScrollableScrollPhysics(), 
@@ -185,8 +153,8 @@ class _PaginaNuovaRicettaManualeState extends State<PaginaNuovaRicettaManuale> {
                     Expanded(
                       flex: 2,
                       child: TextFormField(
-                        // NUOVO: Mostriamo il testo che c'è già in memoria!
-                        initialValue: _ingredienti[index]['nome'],
+                        // LA MAGIA DEI CAMPI PRE-COMPILATI!
+                        initialValue: _ingredienti[index]['nome']?.toString(),
                         decoration: const InputDecoration(labelText: 'Ingrediente', border: OutlineInputBorder()),
                         onChanged: (valore) => _ingredienti[index]['nome'] = valore,
                       ),
@@ -195,8 +163,7 @@ class _PaginaNuovaRicettaManualeState extends State<PaginaNuovaRicettaManuale> {
                     Expanded(
                       flex: 1,
                       child: TextFormField(
-                        // NUOVO: Mostriamo la quantità che c'è già in memoria!
-                        initialValue: _ingredienti[index]['quantita'],
+                        initialValue: _ingredienti[index]['quantita']?.toString(),
                         keyboardType: TextInputType.number,
                         inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                         decoration: const InputDecoration(labelText: 'Q.tà', border: OutlineInputBorder()),
@@ -207,15 +174,10 @@ class _PaginaNuovaRicettaManualeState extends State<PaginaNuovaRicettaManuale> {
                     DropdownButton<String>(
                       value: _ingredienti[index]['unita'],
                       items: ['g', 'Kg', 'ml', 'L', 'Pz'].map((String unita) {
-                        return DropdownMenuItem<String>(
-                          value: unita,
-                          child: Text(unita, style: const TextStyle(fontWeight: FontWeight.bold)),
-                        );
+                        return DropdownMenuItem<String>(value: unita, child: Text(unita, style: const TextStyle(fontWeight: FontWeight.bold)));
                       }).toList(),
                       onChanged: (nuovoValore) {
-                        setState(() {
-                          _ingredienti[index]['unita'] = nuovoValore!;
-                        });
+                        setState(() { _ingredienti[index]['unita'] = nuovoValore!; });
                       },
                     ),
                     IconButton(
@@ -236,29 +198,18 @@ class _PaginaNuovaRicettaManualeState extends State<PaginaNuovaRicettaManuale> {
             onPressed: _aggiungiIngrediente,
             icon: const Icon(Icons.add_circle_outline),
             label: const Text('Aggiungi Ingrediente'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.orange.shade100, 
-              foregroundColor: Colors.orange.shade900,
-            ),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.orange.shade100, foregroundColor: Colors.orange.shade900),
           ),
         ),
       ],
     );
   }
 
-  // --- MODULO 3: LE FASI (IL PROCEDIMENTO TEMPORALE) ---
   Widget _costruisciSezioneFasi() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          'Procedimento e Tempistiche',
-          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.orange),
-        ),
-        const Text(
-          'Definisci gli step. I minuti sono vitali per far calcolare i turni all\'Intelligenza Artificiale.',
-          style: TextStyle(color: Colors.grey),
-        ),
+        const Text('Procedimento e Tempistiche', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.orange)),
         const SizedBox(height: 15),
 
         ListView.builder(
@@ -275,55 +226,40 @@ class _PaginaNuovaRicettaManualeState extends State<PaginaNuovaRicettaManuale> {
                   children: [
                     Row(
                       children: [
-                        // Un bel numerino tondo per indicare lo Step 1, 2, 3...
-                        CircleAvatar(
-                          backgroundColor: Colors.orange,
-                          foregroundColor: Colors.white,
-                          radius: 14,
-                          child: Text('${index + 1}'),
-                        ),
+                        CircleAvatar(backgroundColor: Colors.orange, foregroundColor: Colors.white, radius: 14, child: Text('${index + 1}')),
                         const SizedBox(width: 10),
                         Expanded(
                           child: TextFormField(
-                            initialValue: _fasi[index]['nome_fase'],
-                            decoration: const InputDecoration(labelText: 'Azione (es. Impasto, Cottura)', border: OutlineInputBorder()),
+                            // LA MAGIA PRE-COMPILATA PER LE FASI
+                            initialValue: _fasi[index]['nome_fase']?.toString(),
+                            decoration: const InputDecoration(labelText: 'Azione (es. Impasto)', border: OutlineInputBorder()),
                             onChanged: (valore) => _fasi[index]['nome_fase'] = valore,
                           ),
                         ),
-                        IconButton(
-                          icon: const Icon(Icons.delete, color: Colors.red),
-                          onPressed: () => _rimuoviFase(index),
-                        ),
+                        IconButton(icon: const Icon(Icons.delete, color: Colors.red), onPressed: () => _rimuoviFase(index)),
                       ],
                     ),
                     const SizedBox(height: 10),
                     Row(
                       children: [
-                        // Menu a tendina per scegliere la macchina
                         Expanded(
                           flex: 2,
                           child: DropdownButtonFormField<String>(
                             decoration: const InputDecoration(labelText: 'Macchinario', border: OutlineInputBorder()),
                             value: _fasi[index]['macchinario'],
                             items: ['Banco di lavoro', 'Impastatrice a spirale', 'Forno a piani', 'Cella di lievitazione'].map((String mac) {
-                              return DropdownMenuItem<String>(
-                                value: mac,
-                                child: Text(mac),
-                              );
+                              return DropdownMenuItem<String>(value: mac, child: Text(mac));
                             }).toList(),
                             onChanged: (nuovoValore) {
-                              setState(() {
-                                _fasi[index]['macchinario'] = nuovoValore!;
-                              });
+                              setState(() { _fasi[index]['macchinario'] = nuovoValore!; });
                             },
                           ),
                         ),
                         const SizedBox(width: 10),
-                        // Campo per i minuti
                         Expanded(
                           flex: 1,
                           child: TextFormField(
-                            initialValue: _fasi[index]['tempo_minuti'],
+                            initialValue: _fasi[index]['tempo_minuti']?.toString(),
                             keyboardType: TextInputType.number,
                             inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                             decoration: const InputDecoration(labelText: 'Minuti', border: OutlineInputBorder(), suffixText: 'min'),
@@ -346,22 +282,19 @@ class _PaginaNuovaRicettaManualeState extends State<PaginaNuovaRicettaManuale> {
             onPressed: _aggiungiFase,
             icon: const Icon(Icons.add_task),
             label: const Text('Aggiungi Fase (Step)'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.orange.shade100, 
-              foregroundColor: Colors.orange.shade900,
-            ),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.orange.shade100, foregroundColor: Colors.orange.shade900),
           ),
         ),
       ],
     );
   }
 
-  // --- IMPAGINAZIONE FINALE ---
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Componi Ricetta Manuale'),
+        // Cambiamo il titolo in base a cosa stiamo facendo!
+        title: Text(widget.ricettaDaModificare != null ? 'Modifica Ricetta' : 'Nuova Ricetta Manuale'),
         backgroundColor: Colors.orange,
       ),
       body: SingleChildScrollView(
@@ -369,34 +302,36 @@ class _PaginaNuovaRicettaManualeState extends State<PaginaNuovaRicettaManuale> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Richiamiamo in ordine tutti e 3 i nostri "mattoncini"
             _costruisciSezioneNome(),
             const SizedBox(height: 30),
-            
             _costruisciSezioneIngredienti(),
             const SizedBox(height: 30),
-            
             _costruisciSezioneFasi(),
             const SizedBox(height: 40),
             
-            // Il bottone finale di salvataggio
             Center(
               child: ElevatedButton(
                 onPressed: () {
-                  // Per ora stampiamo il risultato nel terminale per assicurarci che raccolga tutto
-                  print("=== RICETTA SALVATA ===");
-                  print("Nome: ${_nomeController.text}");
-                  print("Ingredienti: $_ingredienti");
-                  print("Fasi: $_fasi");
+                  Map<String, dynamic> ricettaAggiornata = {
+                    'nome': _nomeController.text,
+                    'metodo': widget.ricettaDaModificare != null ? 'Modificata Manualmente' : 'Manuale',
+                    'ingredienti': _ingredienti.length,
+                    'fasi': _fasi.length,
+                    'lista_ingredienti': _ingredienti,
+                    'lista_fasi': _fasi,
+                    'resa_quantita': _resaQuantitaController.text,
+                    'resa_unita': _resaUnita,
+                  };
                   
-                  // In futuro qui invieremo i dati al Backend Python, per ora torniamo indietro
-                  Navigator.pop(context);
+                  // Stampiamo a terminale per confermare
+                  print("=== SALVATAGGIO EFFETTUATO ===");
+                  print(ricettaAggiornata);
+
+                  // Torniamo indietro inviando la ricetta aggiornata!
+                  Navigator.pop(context, ricettaAggiornata);
                 },
-                style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 15),
-                  backgroundColor: Colors.orange,
-                ),
-                child: const Text('Salva Ricetta', style: TextStyle(fontSize: 20, color: Colors.white)),
+                style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 15), backgroundColor: Colors.orange),
+                child: Text(widget.ricettaDaModificare != null ? 'Aggiorna Ricetta' : 'Salva Ricetta', style: const TextStyle(fontSize: 20, color: Colors.white)),
               ),
             ),
           ],

@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
-import 'nuova_ricetta_manuale.dart';
+import 'nuova_ricetta_manuale.dart'; // Aggiunto per far viaggiare i dati!
 
 class PaginaDettaglioRicetta extends StatelessWidget {
-  // Questa variabile è la "scatola" che riceverà i dati della ricetta cliccata
   final Map<String, dynamic> ricetta;
 
   const PaginaDettaglioRicetta({super.key, required this.ricetta});
@@ -40,21 +39,54 @@ class PaginaDettaglioRicetta extends StatelessWidget {
             
             const Divider(height: 40, thickness: 2),
 
-            // --- SEZIONE INFO (Per ora mostriamo i dati fittizi del nostro mock database) ---
+            // --- SEZIONE INFO ---
+            if (ricetta['resa_quantita'] != null)
+              Container(
+                margin: const EdgeInsets.only(bottom: 20),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.orange.shade50,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.orange.shade200),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.pie_chart, color: Colors.orange),
+                    const SizedBox(width: 10),
+                    Text(
+                      'Resa Stimata: ${ricetta['resa_quantita']} ${ricetta['resa_unita']}', 
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)
+                    ),
+                  ],
+                ),
+              ),
+
             const Text(
-              'Ingredienti Registrati', 
+              'Ingredienti nel dettaglio', 
               style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.teal)
             ),
             const SizedBox(height: 10),
-            Card(
-              elevation: 2,
-              child: ListTile(
-                leading: const Icon(Icons.scale, color: Colors.orange),
-                title: Text('Numero di ingredienti: ${ricetta['ingredienti']}'),
-                subtitle: const Text('I dettagli specifici appariranno qui quando collegheremo il database.'),
-              ),
-            ),
             
+            if (ricetta['lista_ingredienti'] != null && (ricetta['lista_ingredienti'] as List).isNotEmpty)
+              ListView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: (ricetta['lista_ingredienti'] as List).length,
+                itemBuilder: (context, index) {
+                  final ing = ricetta['lista_ingredienti'][index];
+                  return Card(
+                    elevation: 1,
+                    child: ListTile(
+                      leading: const Icon(Icons.scale, color: Colors.orange, size: 20),
+                      title: Text(ing['nome'] ?? 'Sconosciuto', style: const TextStyle(fontWeight: FontWeight.bold)),
+                      trailing: Text('${ing['quantita']} ${ing['unita']}', style: const TextStyle(fontSize: 16)),
+                    ),
+                  );
+                },
+              )
+            else
+              const Text('Nessun dettaglio ingredienti disponibile.', style: TextStyle(fontStyle: FontStyle.italic)),
+
             const SizedBox(height: 30),
             
             const Text(
@@ -62,23 +94,39 @@ class PaginaDettaglioRicetta extends StatelessWidget {
               style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.teal)
             ),
             const SizedBox(height: 10),
-            Card(
-              elevation: 2,
-              child: ListTile(
-                leading: const Icon(Icons.access_time, color: Colors.orange),
-                title: Text('Fasi (step) previste: ${ricetta['fasi']}'),
-                subtitle: const Text('I tempi e i macchinari appariranno qui quando collegheremo il database.'),
-              ),
-            ),
+            
+            if (ricetta['lista_fasi'] != null && (ricetta['lista_fasi'] as List).isNotEmpty)
+              ListView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: (ricetta['lista_fasi'] as List).length,
+                itemBuilder: (context, index) {
+                  final fase = ricetta['lista_fasi'][index];
+                  return Card(
+                    elevation: 1,
+                    child: ListTile(
+                      leading: CircleAvatar(
+                        radius: 12,
+                        backgroundColor: Colors.teal,
+                        child: Text('${index + 1}', style: const TextStyle(color: Colors.white, fontSize: 12)),
+                      ),
+                      title: Text(fase['nome_fase'] ?? 'Fase Sconosciuta', style: const TextStyle(fontWeight: FontWeight.bold)),
+                      subtitle: Text('Macchina: ${fase['macchinario'] ?? 'Non definita'}'),
+                      trailing: Text('${fase['tempo_minuti'] ?? 0} min', style: const TextStyle(fontSize: 16, color: Colors.orange, fontWeight: FontWeight.bold)),
+                    ),
+                  );
+                },
+              )
+            else
+              const Text('Nessun dettaglio fasi disponibile.', style: TextStyle(fontStyle: FontStyle.italic)),
           ],
         ),
       ),
       
-// --- IL BOTTONE DI MODIFICA ---
+      // --- IL BOTTONE DI MODIFICA CHE ORA "SPEDISCE" I DATI ---
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () {
-          // Usiamo il Navigatore per aprire il modulo manuale, 
-          // passandogli la "ricetta" corrente come pacchetto!
+          // Apre il modulo passandogli i dati della ricetta corrente!
           Navigator.push(
             context,
             MaterialPageRoute(
