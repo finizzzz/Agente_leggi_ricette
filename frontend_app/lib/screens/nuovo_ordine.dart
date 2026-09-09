@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'tabella_marcia.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 
 class PaginaNuovoOrdine extends StatefulWidget {
   const PaginaNuovoOrdine({super.key});
@@ -114,11 +115,10 @@ class _PaginaNuovoOrdineState extends State<PaginaNuovoOrdine> {
         const SizedBox(height: 10),
         Row(
           children: [
-Expanded(
+            Expanded(
               child: TextField(
                 controller: _kgController,
                 keyboardType: TextInputType.number,
-                // NUOVA RIGA: Accetta ESCLUSIVAMENTE numeri da 0 a 9 e il punto decimale 
                 inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]'))],
                 decoration: const InputDecoration(
                   border: OutlineInputBorder(),
@@ -167,7 +167,6 @@ Expanded(
     );
   }
 
-  // --- IL BUILD FINALE (Cortissimo grazie ai moduli!) ---
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -191,29 +190,63 @@ Expanded(
             
             Center(
               child: ElevatedButton(
-                onPressed: () {
+                onPressed: () async {
                   if (_ordiniMultipli.isEmpty) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(content: Text('Errore: Inserisci almeno un ordine!'), backgroundColor: Colors.red),
                     );
                     return;
                   }
-                  
+
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Tutti gli ordini salvati con successo!'), backgroundColor: Colors.green),
+                    const SnackBar(content: Text('Invio ordini al database in corso...'), backgroundColor: Colors.orange),
                   );
 
-                  print("=== ORDINI COMPLESSIVI DA INVIARE ===");
-                  print(_ordiniMultipli);
-                  
-                  Future.delayed(const Duration(seconds: 1), () {
-                    if (context.mounted) Navigator.pop(context, _ordiniMultipli);
-                  });
+                  DateTime domani = DateTime.now().add(const Duration(days: 1));
+                  String dataConsegnaSql = "${domani.year}-${domani.month.toString().padLeft(2, '0')}-${domani.day.toString().padLeft(2, '0')}";
+
+                  try {
+                    List<Future> chiamateApi = [];
+                    
+                    for (var voce in _ordiniMultipli) {
+                      int idRicetta = voce['prodotto'] == 'Ciabatta Artigianale con Biga' ? 1 : 1; 
+
+                      var payload = {
+                        "cliente": voce['cliente'],
+                        "ricetta_id": idRicetta,
+                        "quantita_kg": double.parse(voce['kg'].toString().replaceAll(',', '.')),
+                        "data_consegna": dataConsegnaSql,
+                        "orario_consegna": "${voce['orario']}:00" 
+                      };
+
+                      chiamateApi.add(http.post(
+                        Uri.parse('http://127.0.0.1:8000/ordini'),
+                        headers: {"Content-Type": "application/json"},
+                        body: json.encode(payload)
+                      ));
+                    }
+
+                    await Future.wait(chiamateApi);
+                    
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Tutti gli ordini salvati nel database MySQL!'), backgroundColor: Colors.green),
+                      );
+                      Navigator.pop(context, _ordiniMultipli);
+                    }
+                    
+                  } catch (e) {
+                    print("Errore invio ordini: $e");
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Errore di connessione al server!'), backgroundColor: Colors.red),
+                    );
+                  }
                 },
                 style: ElevatedButton.styleFrom(
                   padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 15),
                   backgroundColor: Colors.orange,
                 ),
+                // ECCO IL PEZZO CHE MANCAVA! IL TESTO DEL BOTTONE.
                 child: const Text('Salva e Invia Tutto', style: TextStyle(fontSize: 20, color: Colors.white)),
               ),
             ),

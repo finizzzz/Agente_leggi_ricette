@@ -78,6 +78,19 @@ def inizializza_database():
         )
         """)
 
+        # Tabella 6: Turni Calendario (Gli eventi specifici giorno per giorno)
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS turni_calendario (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            data_turno DATE NOT NULL,
+            tipo VARCHAR(50) NOT NULL,
+            dipendente VARCHAR(100),
+            ruolo_dipendente VARCHAR(50),
+            cliente VARCHAR(100),
+            orario VARCHAR(50) NOT NULL
+        )
+        """)
+
         conn.commit()
         print("✅ Tutte le 5 tabelle (inclusi gli 'orari_panificio') sono state create/verificate con successo!")
 

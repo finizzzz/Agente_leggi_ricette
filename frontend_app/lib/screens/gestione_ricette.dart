@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:file_picker/file_picker.dart'; // BENTORNATO FILE PICKER!
+import 'package:file_picker/file_picker.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+
 import 'nuova_ricetta_manuale.dart';
 import 'dettaglio_ricetta.dart';
 
@@ -11,95 +14,150 @@ class PaginaRicette extends StatefulWidget {
 }
 
 class _PaginaRicetteState extends State<PaginaRicette> {
-  // Le nostre 3 ricette di prova, con la Ciabatta pronta per la Modalità Modifica!
-  final List<Map<String, dynamic>> _listaRicette = [
-    {
-      'nome': 'Ciabatta Artigianale con Biga', 
-      'metodo': 'Manuale', 
-      'ingredienti': 2, 
-      'fasi': 1,
-      // --- AGGIUNTO: I DATI DELLA RESA ---
-      'resa_quantita': '15',
-      'resa_unita': 'Kg',
-      // -----------------------------------
-      'lista_ingredienti': [
-        {'nome': 'Farina Tipo 1', 'quantita': '5', 'unita': 'Kg'},
-        {'nome': 'Acqua', 'quantita': '3.5', 'unita': 'L'}
-      ],
-      'lista_fasi': [
-        {'nome_fase': 'Impasto Biga', 'macchinario': 'Impastatrice a spirale', 'tempo_minuti': '15'}
-      ]
-    },
-    {'nome': 'Pane di Segale', 'metodo': 'PDF', 'ingredienti': 4, 'fasi': 3},
-    {'nome': 'Filone Integrale', 'metodo': 'Manuale', 'ingredienti': 6, 'fasi': 5},
-  ];
+  // MEMORIA VUOTA: Niente più esempi finti! Li scaricheremo da MySQL
+  List<Map<String, dynamic>> _listaRicette = [];
+  bool _staCaricando = true;
 
-// --- FUNZIONE 1: CARICA FILE E COLLEGAMENTO (SIMULATO) ALL'IA ---
+  @override
+  void initState() {
+    super.initState();
+    _scaricaRicette(); 
+  }
+
+  // --- API: SCARICA LE RICETTE DAL DATABASE (GET) ---
+  Future<void> _scaricaRicette() async {
+    setState(() => _staCaricando = true);
+    try {
+      final risposta = await http.get(Uri.parse('http://127.0.0.1:8000/ricette'));
+      if (risposta.statusCode == 200) {
+        final datiTradotti = json.decode(risposta.body);
+        if (datiTradotti['successo'] == true) {
+          setState(() {
+            _listaRicette.clear();
+            for (var r in datiTradotti['dati']) {
+              // Estraiamo il pacchetto JSON completo salvato nel DB
+              var datiJson = r['dati_json'] ?? {};
+              
+              _listaRicette.add({
+                'id': r['id'],
+                'nome': r['nome_ricetta'] ?? datiJson['nome'] ?? 'Senza Nome',
+                'resa_kg': r['resa_kg'],
+                'metodo': datiJson['metodo'] ?? 'Salvata nel DB',
+                'ingredienti': (datiJson['lista_ingredienti'] as List?)?.length ?? 0,
+                'fasi': (datiJson['lista_fasi'] as List?)?.length ?? 0,
+                'lista_ingredienti': datiJson['lista_ingredienti'] ?? [],
+                'lista_fasi': datiJson['lista_fasi'] ?? [],
+                'resa_quantita': datiJson['resa_quantita']?.toString() ?? r['resa_kg'].toString(),
+                'resa_unita': datiJson['resa_unita'] ?? 'Kg',
+              });
+            }
+            _staCaricando = false;
+          });
+        }
+      }
+    } catch (e) {
+      print("Errore GET Ricette: $e");
+      setState(() => _staCaricando = false);
+    }
+  }
+
+  // --- API: ELIMINA RICETTA (DELETE) ---
+  Future<void> _eliminaRicetta(int idRicetta) async {
+    setState(() => _staCaricando = true);
+    try {
+      final risposta = await http.delete(Uri.parse('http://127.0.0.1:8000/ricette/$idRicetta'));
+      if (risposta.statusCode == 200) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Ricetta eliminata dal database!'), backgroundColor: Colors.red));
+      }
+    } catch (e) {
+      print("Errore DELETE Ricetta: $e");
+    }
+    await _scaricaRicette(); // Ricarichiamo la lista pulita
+  }
+
+  // --- API: SALVA/AGGIORNA RICETTA (POST / PUT) ---
+  Future<void> _salvaRicettaSulServer(Map<String, dynamic> pacchettoDart, {int? idEsistente}) async {
+    setState(() => _staCaricando = true);
+    try {
+      // Adattiamo i dati per il vigilante in Python (RicettaDati)
+      Map<String, dynamic> payloadPerPython = {
+        "nome_ricetta": pacchettoDart['nome'] ?? 'Nuova Ricetta',
+        "resa_kg": double.tryParse(pacchettoDart['resa_quantita'].toString()) ?? 0.0,
+        "dati_json": pacchettoDart 
+      };
+
+      http.Response risposta;
+      String corpoJson = json.encode(payloadPerPython);
+      Map<String, String> intestazioni = {"Content-Type": "application/json"};
+
+      if (idEsistente == null) {
+        // Nuova ricetta
+        risposta = await http.post(Uri.parse('http://127.0.0.1:8000/ricette'), headers: intestazioni, body: corpoJson);
+      } else {
+        // Modifica ricetta esistente
+        risposta = await http.put(Uri.parse('http://127.0.0.1:8000/ricette/$idEsistente'), headers: intestazioni, body: corpoJson);
+      }
+
+      if (risposta.statusCode == 200) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Ricetta salvata nel Database!'), backgroundColor: Colors.green));
+      }
+    } catch (e) {
+      print("Errore Salvataggio Ricetta: $e");
+    }
+    await _scaricaRicette();
+  }
+
+  // --- LETTURA PDF E IA ---
   Future<void> _caricaDocumento() async {
-    // 1. Scegliamo il file
     var risultato = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['pdf', 'docx', 'doc'],
+      withData: true, 
     );
 
     if (risultato != null && risultato.files.isNotEmpty) {
-      String nomeFile = risultato.files.single.name;
+      var fileSelezionato = risultato.files.single;
+      String nomeFile = fileSelezionato.name;
       
       if (!mounted) return;
 
-      // 2. Avvisiamo che l'IA sta lavorando
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Lettura di "$nomeFile"... L\'Agente IA sta estraendo i dati!'),
-          backgroundColor: Colors.blue,
-          duration: const Duration(seconds: 2),
-        ),
+        SnackBar(content: Text('Invio di "$nomeFile" all\'IA in corso...'), backgroundColor: Colors.blue, duration: const Duration(seconds: 4)),
       );
 
-      // 3. Simuliamo il tempo di calcolo dello script Python (Gemini)
-      await Future.delayed(const Duration(seconds: 2));
-
-      // 4. TRADUZIONE: Ecco il pacchetto formattato esattamente come lo 
-      // restituirà la nostra IA in Python, convertito nello standard manuale!
-      Map<String, dynamic> ricettaEstrattaDallIA = {
-        'nome': nomeFile.replaceAll(".pdf", "").replaceAll(".docx", ""),
-        'metodo': 'IA da PDF',
-        'resa_quantita': '8.2', // L'IA stima la resa calcolando il calo peso!
-        'resa_unita': 'Kg',
-        'lista_ingredienti': [
-          {'nome': 'Farina Tipo 1', 'quantita': '5', 'unita': 'Kg'},
-          {'nome': 'Acqua', 'quantita': '3.5', 'unita': 'L'},
-          {'nome': 'Lievito Fresco', 'quantita': '50', 'unita': 'g'}
-        ],
-        'lista_fasi': [
-          {'nome_fase': 'Impasto Biga', 'macchinario': 'Impastatrice a spirale', 'tempo_minuti': '15'},
-          {'nome_fase': 'Lievitazione', 'macchinario': 'Cella di lievitazione', 'tempo_minuti': '960'},
-          {'nome_fase': 'Cottura', 'macchinario': 'Forno a piani', 'tempo_minuti': '35'}
-        ]
-      };
-
-      if (!mounted) return;
-
-      // 5. LA MAGIA: Invece di salvare ciecamente, apriamo il modulo manuale 
-      // passandogli i dati dell'IA per farli controllare al Panettiere!
-      final ricettaConfermata = await Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => PaginaNuovaRicettaManuale(ricettaDaModificare: ricettaEstrattaDallIA),
-        ),
-      );
-
-      // 6. Se hai controllato e premuto "Aggiorna/Salva Ricetta"
-      if (ricettaConfermata != null) {
-        setState(() {
-          _listaRicette.add(ricettaConfermata);
-        });
-        
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Ricetta dell\'IA verificata e salvata nel Ricettario!'), backgroundColor: Colors.green),
-          );
+      try {
+        var uri = Uri.parse('http://127.0.0.1:8000/analizza_documento');
+        var request = http.MultipartRequest('POST', uri);
+        if (fileSelezionato.bytes != null) {
+          request.files.add(http.MultipartFile.fromBytes('file', fileSelezionato.bytes!, filename: nomeFile));
         }
+
+        var rispostaStream = await request.send();
+        var risposta = await http.Response.fromStream(rispostaStream);
+
+        if (risposta.statusCode == 200) {
+          var datiTradotti = json.decode(risposta.body);
+          if (datiTradotti['successo'] == true) {
+            Map<String, dynamic> ricettaIA = datiTradotti['dati_ia'];
+            
+            if (!mounted) return;
+
+            // L'IA ha finito! Apriamo il modulo manuale per la conferma
+            final ricettaConfermata = await Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => PaginaNuovaRicettaManuale(ricettaDaModificare: ricettaIA)),
+            );
+
+            // SE CONFERMATA, SALVIAMO NEL DB (POST)
+            if (ricettaConfermata != null) {
+              await _salvaRicettaSulServer(ricettaConfermata);
+            }
+          } else {
+            if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Errore IA: ${datiTradotti["errore"]}'), backgroundColor: Colors.red));
+          }
+        }
+      } catch (e) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Errore di connessione col server.'), backgroundColor: Colors.red));
       }
     }
   }
@@ -107,114 +165,82 @@ class _PaginaRicetteState extends State<PaginaRicette> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Gestione Ricette'),
-        backgroundColor: Colors.orange,
-      ),
+      appBar: AppBar(title: const Text('Gestione Ricette'), backgroundColor: Colors.orange),
       body: Padding(
         padding: const EdgeInsets.all(20.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Ricettario del Panificio',
-              style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.orange),
-            ),
+            const Text('Ricettario del Panificio', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.orange)),
             const SizedBox(height: 20),
             
-            // --- I BOTTONI PER AGGIUNGERE RICETTE ---
             Row(
               children: [
                 Expanded(
                   child: ElevatedButton.icon(
-                    // Aggiungiamo 'async' perché dovremo 'aspettare' un risultato
                     onPressed: () async {
-                      
-                      // Usiamo 'await' per aspettare che la pagina si chiuda e ci restituisca il pacchetto
-                      final ricettaRestituita = await Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (context) => const PaginaNuovaRicettaManuale()),
-                      );
-
-                      // Se il pacchetto NON è vuoto (cioè se non sei tornato indietro senza salvare)...
+                      // Modulo per una ricetta vuota
+                      final ricettaRestituita = await Navigator.push(context, MaterialPageRoute(builder: (context) => const PaginaNuovaRicettaManuale()));
                       if (ricettaRestituita != null) {
-                        setState(() {
-                          // ...Aggiungiamo la nuova ricetta alla nostra lista!
-                          _listaRicette.add(ricettaRestituita);
-                        });
+                        await _salvaRicettaSulServer(ricettaRestituita);
                       }
                     },
                     icon: const Icon(Icons.edit_note),
                     label: const Text('Manuale'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.orange,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 15),
-                    ),
+                    style: ElevatedButton.styleFrom(backgroundColor: Colors.orange, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 15)),
                   ),
                 ),
                 const SizedBox(width: 15),
                 Expanded(
                   child: ElevatedButton.icon(
-                    // ABBIAMO RICOLLEGATO IL BOTTONE ALLA FUNZIONE!
                     onPressed: _caricaDocumento, 
                     icon: const Icon(Icons.upload_file),
                     label: const Text('Da PDF/DOCX'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.orange.shade200,
-                      foregroundColor: Colors.orange.shade900,
-                      padding: const EdgeInsets.symmetric(vertical: 15),
-                    ),
+                    style: ElevatedButton.styleFrom(backgroundColor: Colors.orange.shade200, foregroundColor: Colors.orange.shade900, padding: const EdgeInsets.symmetric(vertical: 15)),
                   ),
                 ),
               ],
             ),
             
             const SizedBox(height: 30),
-            const Text(
-              'Ricette Salvate',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-            ),
+            const Text('Ricette Salvate', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
             const SizedBox(height: 10),
 
-            // --- LA LISTA DELLE RICETTE CLICCABILI (CON CESTINO) ---
             Expanded(
-              child: ListView.builder(
-                itemCount: _listaRicette.length,
-                itemBuilder: (context, index) {
-                  final ricetta = _listaRicette[index];
-                  return Card(
-                    elevation: 3,
-                    margin: const EdgeInsets.only(bottom: 15),
-                    child: InkWell(
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => PaginaDettaglioRicetta(ricetta: ricetta),
+              child: _staCaricando 
+                ? const Center(child: CircularProgressIndicator(color: Colors.orange))
+                : _listaRicette.isEmpty
+                  ? const Center(child: Text("Il tuo ricettario è vuoto. Inserisci la prima ricetta!", style: TextStyle(fontSize: 16, fontStyle: FontStyle.italic)))
+                  : ListView.builder(
+                  itemCount: _listaRicette.length,
+                  itemBuilder: (context, index) {
+                    final ricetta = _listaRicette[index];
+                    return Card(
+                      elevation: 3,
+                      margin: const EdgeInsets.only(bottom: 15),
+                      child: InkWell(
+                        onTap: () async {
+                          // APRIAMO IL DETTAGLIO. Se l'utente preme "Modifica" dentro al dettaglio e salva, ci ritornerà i dati aggiornati
+                          final ricettaAggiornata = await Navigator.push(context, MaterialPageRoute(builder: (context) => PaginaDettaglioRicetta(ricetta: ricetta)));
+                          
+                          if (ricettaAggiornata != null) {
+                            // Aggiorniamo la ricetta esistente passando l'ID (PUT)
+                            await _salvaRicettaSulServer(ricettaAggiornata, idEsistente: ricetta['id']);
+                          }
+                        },
+                        child: ListTile(
+                          leading: CircleAvatar(backgroundColor: Colors.orange.shade100, child: const Icon(Icons.bakery_dining, color: Colors.orange)),
+                          title: Text(ricetta['nome'], style: const TextStyle(fontWeight: FontWeight.bold)),
+                          subtitle: Text('Ingredienti: ${ricetta['ingredienti']} | Fasi: ${ricetta['fasi']}'),
+                          trailing: IconButton(
+                            icon: const Icon(Icons.delete, color: Colors.red),
+                            onPressed: () => _eliminaRicetta(ricetta['id']), // ELIMINAZIONE REALE DA MYSQL
                           ),
-                        );
-                      },
-                      child: ListTile(
-                        leading: CircleAvatar(
-                          backgroundColor: Colors.orange.shade100,
-                          child: const Icon(Icons.bakery_dining, color: Colors.orange),
-                        ),
-                        title: Text(ricetta['nome'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold)),
-                        subtitle: Text('Inserita via: ${ricetta['metodo']}'),
-                        trailing: IconButton(
-                          icon: const Icon(Icons.delete, color: Colors.red),
-                          onPressed: () {
-                            setState(() {
-                              _listaRicette.removeAt(index);
-                            });
-                          },
                         ),
                       ),
-                    ),
-                  );
-                },
-              ),
+                    );
+                  },
+                ),
             ),
           ],
         ),

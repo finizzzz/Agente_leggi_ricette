@@ -1,17 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:intl/date_symbol_data_local.dart'; // Il dizionario per il calendario in italiano!
-
-// Importiamo la nostra Home Page centrale (Hub Gestionale)
+import 'package:intl/date_symbol_data_local.dart';
+import 'package:flutter_localizations/flutter_localizations.dart'; // I DIZIONARI UFFICIALI!
 import 'screens/dashboard.dart'; 
 
 void main() async {
-  // 1. Assicura che il motore di Flutter sia pronto prima di fare caricamenti esterni
   WidgetsFlutterBinding.ensureInitialized(); 
-  
-  // 2. Carica i formati delle date in italiano per risolvere l'errore del Calendario
   await initializeDateFormatting('it_IT', null); 
-  
-  // 3. Avvia l'applicazione
   runApp(const PanificioApp()); 
 }
 
@@ -22,14 +16,20 @@ class PanificioApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Panificio IA',
-      // Nasconde la fascetta rossa "DEBUG" in alto a destra
       debugShowCheckedModeBanner: false, 
       
+      // --- LE REGOLE DI TRADUZIONE GLOBALI ---
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      supportedLocales: const [
+        Locale('it', 'IT'), // Diciamo a Flutter che parliamo solo italiano
+      ],
+      
       theme: ThemeData(
-        // Il colore tema del nostro gestionale
         primarySwatch: Colors.orange,
-        
-        // Impostiamo un design moderno per i bottoni e i menu di tutta l'app
         appBarTheme: const AppBarTheme(
           elevation: 0,
           centerTitle: true,
@@ -37,7 +37,6 @@ class PanificioApp extends StatelessWidget {
         ),
       ),
       
-      // La pagina di partenza è la nostra Dashboard a griglia!
       home: const DashboardHomePage(),
     );
   }
