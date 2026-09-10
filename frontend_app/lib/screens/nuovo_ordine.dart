@@ -14,11 +14,44 @@ class _PaginaNuovoOrdineState extends State<PaginaNuovoOrdine> {
   final TextEditingController _kgController = TextEditingController();
   final TextEditingController _clienteController = TextEditingController(); 
   
-  String _tipoPane = 'Ciabatta Artigianale con Biga'; 
   TimeOfDay? _orarioConsegna;
+  
+  // --- NUOVE VARIABILI PER IL DATABASE DELLE RICETTE ---
+  List<Map<String, dynamic>> _ricetteDisponibili = [];
+  bool _staCaricandoRicette = true;
+  Map<String, dynamic>? _ricettaSelezionata; // Ora salviamo l'intero "pacchetto" della ricetta
   
   // L'unico carrello ufficiale
   final List<Map<String, dynamic>> _ordiniMultipli = [];
+
+  // All'avvio della pagina, scarichiamo le ricette vere!
+  @override
+  void initState() {
+    super.initState();
+    _scaricaRicette();
+  }
+
+  Future<void> _scaricaRicette() async {
+    try {
+      final risposta = await http.get(Uri.parse('http://127.0.0.1:8000/ricette'));
+      if (risposta.statusCode == 200) {
+        final datiTradotti = json.decode(risposta.body);
+        if (datiTradotti['successo'] == true) {
+          setState(() {
+            _ricetteDisponibili = List<Map<String, dynamic>>.from(datiTradotti['dati']);
+            // Se c'è almeno una ricetta, selezioniamo la prima di default
+            if (_ricetteDisponibili.isNotEmpty) {
+              _ricettaSelezionata = _ricetteDisponibili[0];
+            }
+            _staCaricandoRicette = false;
+          });
+        }
+      }
+    } catch (e) {
+      print("Errore scaricamento ricette: $e");
+      setState(() => _staCaricandoRicette = false);
+    }
+  }
 
   // --- FUNZIONI LOGICHE ---
   Future<void> _scegliOrario() async {
@@ -34,12 +67,14 @@ class _PaginaNuovoOrdineState extends State<PaginaNuovoOrdine> {
   }
 
   void _aggiungiVoce() {
-    if (_kgController.text.isNotEmpty && _clienteController.text.isNotEmpty && _orarioConsegna != null) {
+    // Controlliamo anche che la ricetta sia stata effettivamente selezionata dal DB
+    if (_kgController.text.isNotEmpty && _clienteController.text.isNotEmpty && _orarioConsegna != null && _ricettaSelezionata != null) {
       setState(() {
         _ordiniMultipli.add({
           'cliente': _clienteController.text,
           'orario': '${_orarioConsegna!.hour.toString().padLeft(2, '0')}:${_orarioConsegna!.minute.toString().padLeft(2, '0')}',
-          'prodotto': _tipoPane,
+          'prodotto': _ricettaSelezionata!['nome_ricetta'], // Il nome ci serve per vederlo a schermo
+          'ricetta_id': _ricettaSelezionata!['id'], // Questo è il vero ID che manderemo a MySQL!
           'kg': _kgController.text,
         });
         _kgController.clear(); 
@@ -47,7 +82,7 @@ class _PaginaNuovoOrdineState extends State<PaginaNuovoOrdine> {
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Attenzione: Compila Cliente, Orario e Kg!'),
+          content: Text('Attenzione: Compila Cliente, Orario, Prodotto e Kg!'),
           backgroundColor: Colors.red,
         ),
       );
@@ -96,22 +131,30 @@ class _PaginaNuovoOrdineState extends State<PaginaNuovoOrdine> {
       children: [
         const Text('Cosa dobbiamo preparare?', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
         const SizedBox(height: 10),
-        DropdownButton<String>(
-          value: _tipoPane,
-          isExpanded: true,
-          items: <String>['Ciabatta Artigianale con Biga', 'Filone Classico', 'Panini all\'Olio']
-              .map((String valore) {
-            return DropdownMenuItem<String>(
-              value: valore,
-              child: Text(valore, style: const TextStyle(fontSize: 18)),
-            );
-          }).toList(),
-          onChanged: (String? nuovaScelta) {
-            setState(() {
-              _tipoPane = nuovaScelta!;
-            });
-          },
-        ),
+        
+        // SE STIAMO ANCORA CARICANDO DAL DB, MOSTRIAMO LA ROTELLINA
+        _staCaricandoRicette
+            ? const CircularProgressIndicator(color: Colors.orange)
+            : _ricetteDisponibili.isEmpty
+                // SE IL DATABASE È VUOTO:
+                ? const Text('Nessuna ricetta nel Database! Vai ad aggiungerne una.', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold))
+                // ALTRIMENTI MOSTRIAMO IL MENU A TENDINA DINAMICO:
+                : DropdownButton<Map<String, dynamic>>(
+                    value: _ricettaSelezionata,
+                    isExpanded: true,
+                    items: _ricetteDisponibili.map((ricetta) {
+                      return DropdownMenuItem<Map<String, dynamic>>(
+                        value: ricetta,
+                        child: Text(ricetta['nome_ricetta'], style: const TextStyle(fontSize: 18)),
+                      );
+                    }).toList(),
+                    onChanged: (Map<String, dynamic>? nuovaScelta) {
+                      setState(() {
+                        _ricettaSelezionata = nuovaScelta!;
+                      });
+                    },
+                  ),
+                  
         const SizedBox(height: 10),
         Row(
           children: [
@@ -157,7 +200,7 @@ class _PaginaNuovoOrdineState extends State<PaginaNuovoOrdine> {
                     child: ListTile(
                       leading: const Icon(Icons.bakery_dining, color: Colors.orange),
                       title: Text('${voce['cliente']} - Ore ${voce['orario']}'),
-                      subtitle: Text(voce['prodotto']),
+                      subtitle: Text(voce['prodotto']), // Mostriamo il nome
                       trailing: Text('${voce['kg']} Kg', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                     ),
                   );
@@ -206,33 +249,44 @@ class _PaginaNuovoOrdineState extends State<PaginaNuovoOrdine> {
                   String dataConsegnaSql = "${domani.year}-${domani.month.toString().padLeft(2, '0')}-${domani.day.toString().padLeft(2, '0')}";
 
                   try {
-                    List<Future> chiamateApi = [];
+                    bool erroreTrovato = false;
+                    String messaggioErrore = "";
                     
                     for (var voce in _ordiniMultipli) {
-                      int idRicetta = voce['prodotto'] == 'Ciabatta Artigianale con Biga' ? 1 : 1; 
-
                       var payload = {
                         "cliente": voce['cliente'],
-                        "ricetta_id": idRicetta,
+                        // ECCO IL CAMBIAMENTO! Usiamo l'ID salvato nel carrello.
+                        "ricetta_id": voce['ricetta_id'], 
                         "quantita_kg": double.parse(voce['kg'].toString().replaceAll(',', '.')),
                         "data_consegna": dataConsegnaSql,
                         "orario_consegna": "${voce['orario']}:00" 
                       };
 
-                      chiamateApi.add(http.post(
+                      final risposta = await http.post(
                         Uri.parse('http://127.0.0.1:8000/ordini'),
                         headers: {"Content-Type": "application/json"},
                         body: json.encode(payload)
-                      ));
+                      );
+                      
+                      final datiDecodificati = json.decode(risposta.body);
+                      if (datiDecodificati['successo'] == false) {
+                        erroreTrovato = true;
+                        messaggioErrore = datiDecodificati['errore'];
+                        break; 
+                      }
                     }
 
-                    await Future.wait(chiamateApi);
-                    
                     if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Tutti gli ordini salvati nel database MySQL!'), backgroundColor: Colors.green),
-                      );
-                      Navigator.pop(context, _ordiniMultipli);
+                      if (erroreTrovato) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text(messaggioErrore), backgroundColor: Colors.red, duration: const Duration(seconds: 4)),
+                        );
+                      } else {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Tutti gli ordini salvati nel database MySQL!'), backgroundColor: Colors.green),
+                        );
+                        Navigator.pop(context, _ordiniMultipli);
+                      }
                     }
                     
                   } catch (e) {
@@ -246,7 +300,6 @@ class _PaginaNuovoOrdineState extends State<PaginaNuovoOrdine> {
                   padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 15),
                   backgroundColor: Colors.orange,
                 ),
-                // ECCO IL PEZZO CHE MANCAVA! IL TESTO DEL BOTTONE.
                 child: const Text('Salva e Invia Tutto', style: TextStyle(fontSize: 20, color: Colors.white)),
               ),
             ),
