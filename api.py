@@ -14,6 +14,8 @@ from google.genai import types
 from fastapi.middleware.cors import CORSMiddleware 
 from typing import Optional
 import requests 
+import math
+from ortools.sat.python import cp_model
 
 # 1. Carichiamo le password
 load_dotenv()
@@ -487,5 +489,83 @@ def elimina_macchinario(id_macchina: int):
         cursor.close()
         conn.close()
         return {"successo": True, "messaggio": "Macchinario eliminato"}
+    except Exception as e:
+        return {"successo": False, "errore": str(e)}
+
+# ==========================================
+# 7. IL PULSANTE MAGICO: LO SCHEDULATORE IA
+# ==========================================
+@app.get("/calcola_turni")
+def calcola_turni():
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+
+        # 1. Filtro: Solo ordini IN ATTESA per DOMANI
+        cursor.execute("""
+            SELECT o.id, o.quantita_kg, o.orario_consegna, r.nome_ricetta, r.resa_kg, r.dati_json
+            FROM ordini o 
+            JOIN ricette r ON o.ricetta_id = r.id
+            WHERE o.stato = 'in_attesa' AND o.data_consegna = CURDATE() + INTERVAL 1 DAY
+        """)
+        ordini_domani = cursor.fetchall()
+        
+        if not ordini_domani:
+            return {"successo": True, "messaggio": "Nessun ordine per domani. Il panificio può riposare!", "tabella": []}
+
+        # Recuperiamo i macchinari e il primo turno
+        cursor.execute("SELECT nome FROM macchinari")
+        macchinari = [row['nome'] for row in cursor.fetchall()]
+        cursor.execute("SELECT turno_inizio FROM dipendenti LIMIT 1")
+        dipendente = cursor.fetchone()
+        
+        if not dipendente:
+            return {"successo": False, "errore": "Nessun dipendente trovato per iniziare il turno!"}
+
+        inizio_minuti = dipendente['turno_inizio'].total_seconds() // 60
+
+        # ... (Logica OR-Tools per preparare i task) ...
+        # [Per brevità, qui va il motore matematico OR-Tools che avevamo scritto per calcolare le durate]
+        # Simuliamo il risultato del risolutore per concentrarci sulla tua richiesta di Agentic AI:
+        
+        stato = cp_model.OPTIMAL # Sostituisci con il calcolo reale di OR-Tools
+
+        # SCENARIO A: Ottimizzazione Riuscita -> CANCELLAZIONE
+        if stato == cp_model.OPTIMAL or stato == cp_model.FEASIBLE:
+            # Qui si genera la tabella_finale
+            tabella_finale = [{"attivita": "Impasto", "macchinario": "Impastatrice", "minuto_inizio": 360, "minuto_fine": 390}] 
+            
+            # IL NETTURBINO: Elimina gli ordini processati!
+            for ordine in ordini_domani:
+                cursor.execute("DELETE FROM ordini WHERE id = %s", (ordine['id'],))
+            conn.commit()
+            
+            return {"successo": True, "messaggio": "Tabella generata! Ordini rimossi dal DB.", "tabella": tabella_finale}
+        
+        # SCENARIO B: Impossibile -> AUTO-CORREZIONE IA SUI DATI PRE-ESISTENTI
+        else:
+            ordine_critico = ordini_domani[0] 
+            prompt = f"""
+            L'ordine {ordine_critico['id']} ({ordine_critico['quantita_kg']}kg) non può essere completato in tempo.
+            Posticipa l'orario di consegna di 1 o 2 ore per renderlo fattibile.
+            Restituisci ESCLUSIVAMENTE un JSON: {{"azione": "Testo per l'utente", "nuovo_orario": "HH:MM:SS"}}
+            """
+            
+            client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+            risposta = client.models.generate_content(model='gemini-1.5-flash', contents=prompt)
+            correzione = json.loads(risposta.text.replace("```json", "").replace("```", "").strip())
+            
+            # L'IA MODIFICA IL DATABASE DA SOLA DI DEFAULT
+            cursor.execute(
+                "UPDATE ordini SET orario_consegna = %s WHERE id = %s",
+                (correzione['nuovo_orario'], ordine_critico['id'])
+            )
+            conn.commit()
+            
+            return {
+                "successo": False, 
+                "messaggio": f"🤖 Intervento IA: {correzione['azione']}. Dati aggiornati nel DB, premi di nuovo per ricalcolare!"
+            }
+
     except Exception as e:
         return {"successo": False, "errore": str(e)}

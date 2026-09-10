@@ -332,23 +332,30 @@ class _PaginaGestioneOrdiniState extends State<PaginaGestioneOrdini> {
             ),
 
             const SizedBox(height: 20),
-
-            SizedBox(
-              width: double.infinity,
-              height: 60,
-              child: ElevatedButton.icon(
-                onPressed: () {
-                  if (_tuttiGliOrdini.isEmpty) {
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Inserisci almeno un ordine prima di calcolare i turni!'), backgroundColor: Colors.red));
-                    return;
-                  }
-                  Navigator.push(context, MaterialPageRoute(builder: (context) => const PaginaTabellaDiMarcia()));
-                },
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.black87, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15))),
-                icon: const Icon(Icons.smart_toy, size: 28),
-                label: const Text('Inizia Turno (Calcola IA)', style: TextStyle(fontSize: 20)),
-              ),
-            ),
+SizedBox(
+  width: double.infinity,
+  child: ElevatedButton.icon(
+    style: ElevatedButton.styleFrom(
+      backgroundColor: Colors.black87,
+      foregroundColor: Colors.white,
+      padding: const EdgeInsets.symmetric(vertical: 20),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+    ),
+    icon: const Icon(Icons.smart_toy, size: 24),
+    label: const Text('Inizia Turno (Calcola IA)', style: TextStyle(fontSize: 20)),
+    onPressed: () {
+      // Quando premo il bottone nero, vado alla pagina della Tabella di Marcia...
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (context) => const PaginaTabellaDiMarcia()),
+      ).then((_) {
+        // ...e quando torno indietro, ricarico la lista degli ordini 
+        // perché l'IA potrebbe averli eliminati (successo) o modificati (fallimento)!
+        _scaricaOrdini(); 
+      });
+    },
+  ),
+)
           ],
         ),
       ),
