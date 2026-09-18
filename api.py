@@ -1,28 +1,26 @@
 import json 
 import os
 import mysql.connector
-from fastapi import FastAPI
+from fastapi import FastAPI, File, UploadFile
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
-from datetime import date, time
-from fastapi import File, UploadFile
+from datetime import date, time, datetime
 import shutil
 import PyPDF2
 import docx
-from google import genai
-from google.genai import types
 from fastapi.middleware.cors import CORSMiddleware 
 from typing import Optional
 import requests 
 import math
 from ortools.sat.python import cp_model
 
-# 1. Carichiamo le password
+# ==========================================
+# 1. INIZIALIZZAZIONE E CORS
+# ==========================================
 load_dotenv()
 
 app = FastAPI(title="API Panificio IA")
 
-# 2. CORS per permettere la connessione
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], 
@@ -31,7 +29,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- MODELLI DATI ---
+# ==========================================
+# 2. MODELLI DATI
+# ==========================================
 class NuovoOrdine(BaseModel):
     cliente: str
     ricetta_id: int
@@ -63,7 +63,9 @@ class RicettaDati(BaseModel):
     resa_kg: float
     dati_json: dict
 
-# --- CONNESSIONE DB ---
+# ==========================================
+# 3. CONNESSIONE DB
+# ==========================================
 def get_db_connection():
     return mysql.connector.connect(
         host=os.getenv("DB_HOST", "localhost"),
@@ -73,7 +75,7 @@ def get_db_connection():
     )
 
 # ==========================================
-# ORDINI
+# 4. API: ORDINI
 # ==========================================
 @app.get("/ordini")
 def ottieni_ordini():
@@ -82,22 +84,16 @@ def ottieni_ordini():
         cursor = conn.cursor(dictionary=True)
         query = """
             SELECT 
-                o.id, 
-                o.cliente, 
-                o.quantita_kg AS kg, 
-                o.orario_consegna AS orario, 
-                o.stato, 
-                r.nome_ricetta AS prodotto
+                o.id, o.cliente, o.quantita_kg AS kg, o.orario_consegna AS orario, 
+                o.stato, r.nome_ricetta AS prodotto
             FROM ordini o
             LEFT JOIN ricette r ON o.ricetta_id = r.id
         """
         cursor.execute(query)
         lista_ordini = cursor.fetchall()
-        
         for ordine in lista_ordini:
             if ordine['orario']:
                 ordine['orario'] = str(ordine['orario'])[:5] 
-                
         cursor.close()
         conn.close()
         return {"successo": True, "dati": lista_ordini}
@@ -109,18 +105,12 @@ def salva_ordine(ordine: NuovoOrdine):
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        
-        # Controllo di sicurezza: verifichiamo che la ricetta esista!
         cursor.execute("SELECT id FROM ricette WHERE id = %s", (ordine.ricetta_id,))
         if not cursor.fetchone():
-            return {"successo": False, "errore": f"La ricetta con ID {ordine.ricetta_id} non esiste. Vai prima nella sezione Ricette e creane una!"}
+            return {"successo": False, "errore": "Ricetta non trovata."}
 
-        query = """
-            INSERT INTO ordini (cliente, ricetta_id, quantita_kg, data_consegna, orario_consegna, stato)
-            VALUES (%s, %s, %s, %s, %s, 'in_attesa')
-        """
-        valori = (ordine.cliente, ordine.ricetta_id, ordine.quantita_kg, ordine.data_consegna, ordine.orario_consegna)
-        cursor.execute(query, valori)
+        query = "INSERT INTO ordini (cliente, ricetta_id, quantita_kg, data_consegna, orario_consegna, stato) VALUES (%s, %s, %s, %s, %s, 'in_attesa')"
+        cursor.execute(query, (ordine.cliente, ordine.ricetta_id, ordine.quantita_kg, ordine.data_consegna, ordine.orario_consegna))
         conn.commit() 
         nuovo_id = cursor.lastrowid
         cursor.close()
@@ -134,11 +124,7 @@ def modifica_ordine(id_ordine: int, ordine: NuovoOrdine):
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        query = """
-            UPDATE ordini 
-            SET cliente=%s, ricetta_id=%s, quantita_kg=%s, data_consegna=%s, orario_consegna=%s 
-            WHERE id=%s
-        """
+        query = "UPDATE ordini SET cliente=%s, ricetta_id=%s, quantita_kg=%s, data_consegna=%s, orario_consegna=%s WHERE id=%s"
         cursor.execute(query, (ordine.cliente, ordine.ricetta_id, ordine.quantita_kg, ordine.data_consegna, ordine.orario_consegna, id_ordine))
         conn.commit()
         cursor.close()
@@ -159,8 +145,9 @@ def elimina_ordine(id_ordine: int):
         return {"successo": True, "messaggio": "Ordine eliminato"}
     except Exception as e:
         return {"successo": False, "errore": str(e)}
+
 # ==========================================
-# DIPENDENTI
+# 5. API: DIPENDENTI E TURNI
 # ==========================================
 @app.get("/dipendenti")
 def ottieni_dipendenti():
@@ -212,8 +199,7 @@ def elimina_dipendente(id_dipendente: int):
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        query = "DELETE FROM dipendenti WHERE id=%s"
-        cursor.execute(query, (id_dipendente,))
+        cursor.execute("DELETE FROM dipendenti WHERE id=%s", (id_dipendente,))
         conn.commit()
         cursor.close()
         conn.close()
@@ -221,9 +207,6 @@ def elimina_dipendente(id_dipendente: int):
     except Exception as e:
         return {"successo": False, "errore": str(e)}
 
-# ==========================================
-# TURNI CALENDARIO
-# ==========================================
 @app.get("/turni")
 def ottieni_turni():
     try:
@@ -242,10 +225,21 @@ def ottieni_turni():
 @app.post("/turni")
 def aggiungi_turno(turno: TurnoDati):
     try:
+        data_mysql = turno.data_turno
+        if "/" in data_mysql:
+            try:
+                dt = datetime.strptime(data_mysql, "%m/%d/%Y")
+                data_mysql = dt.strftime("%Y-%m-%d")
+            except ValueError:
+                try:
+                    dt = datetime.strptime(data_mysql, "%d/%m/%Y")
+                    data_mysql = dt.strftime("%Y-%m-%d")
+                except ValueError:
+                    pass
         conn = get_db_connection()
         cursor = conn.cursor()
         query = "INSERT INTO turni_calendario (data_turno, tipo, dipendente, ruolo_dipendente, cliente, orario) VALUES (%s, %s, %s, %s, %s, %s)"
-        cursor.execute(query, (turno.data_turno, turno.tipo, turno.dipendente, turno.ruolo_dipendente, turno.cliente, turno.orario))
+        cursor.execute(query, (data_mysql, turno.tipo, turno.dipendente, turno.ruolo_dipendente, turno.cliente, turno.orario))
         conn.commit()
         cursor.close()
         conn.close()
@@ -256,10 +250,21 @@ def aggiungi_turno(turno: TurnoDati):
 @app.put("/turni/{id_turno}")
 def modifica_turno(id_turno: int, turno: TurnoDati):
     try:
+        data_mysql = turno.data_turno
+        if "/" in data_mysql:
+            try:
+                dt = datetime.strptime(data_mysql, "%m/%d/%Y")
+                data_mysql = dt.strftime("%Y-%m-%d")
+            except ValueError:
+                try:
+                    dt = datetime.strptime(data_mysql, "%d/%m/%Y")
+                    data_mysql = dt.strftime("%Y-%m-%d")
+                except ValueError:
+                    pass
         conn = get_db_connection()
         cursor = conn.cursor()
         query = "UPDATE turni_calendario SET data_turno=%s, tipo=%s, dipendente=%s, ruolo_dipendente=%s, cliente=%s, orario=%s WHERE id=%s"
-        cursor.execute(query, (turno.data_turno, turno.tipo, turno.dipendente, turno.ruolo_dipendente, turno.cliente, turno.orario, id_turno))
+        cursor.execute(query, (data_mysql, turno.tipo, turno.dipendente, turno.ruolo_dipendente, turno.cliente, turno.orario, id_turno))
         conn.commit()
         cursor.close()
         conn.close()
@@ -281,7 +286,65 @@ def elimina_turno(id_turno: int):
         return {"successo": False, "errore": str(e)}
 
 # ==========================================
-# RICETTE E IA
+# 6. API: MACCHINARI
+# ==========================================
+@app.get("/macchinari")
+def ottieni_macchinari():
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True) 
+        cursor.execute("SELECT id, nome, tipo, IFNULL(capacita_teglie, 999) AS capacita FROM macchinari")
+        lista_macchinari = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        return {"successo": True, "dati": lista_macchinari}
+    except Exception as e:
+        return {"successo": False, "errore": str(e)}
+
+@app.post("/macchinari")
+def aggiungi_macchinario(macchina: MacchinarioDati):
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        query = "INSERT INTO macchinari (nome, tipo, capacita_teglie) VALUES (%s, %s, %s)"
+        cursor.execute(query, (macchina.nome, macchina.tipo, macchina.capacita))
+        conn.commit()
+        nuovo_id = cursor.lastrowid
+        cursor.close()
+        conn.close()
+        return {"successo": True, "messaggio": "Macchinario aggiunto", "id": nuovo_id}
+    except Exception as e:
+        return {"successo": False, "errore": str(e)}
+
+@app.put("/macchinari/{id_macchina}")
+def modifica_macchinario(id_macchina: int, macchina: MacchinarioDati):
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        query = "UPDATE macchinari SET nome=%s, tipo=%s, capacita_teglie=%s WHERE id=%s"
+        cursor.execute(query, (macchina.nome, macchina.tipo, macchina.capacita, id_macchina))
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return {"successo": True, "messaggio": "Macchinario aggiornato"}
+    except Exception as e:
+        return {"successo": False, "errore": str(e)}
+
+@app.delete("/macchinari/{id_macchina}")
+def elimina_macchinario(id_macchina: int):
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM macchinari WHERE id=%s", (id_macchina,))
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return {"successo": True, "messaggio": "Macchinario eliminato"}
+    except Exception as e:
+        return {"successo": False, "errore": str(e)}
+
+# ==========================================
+# 7. API: RICETTE E AGENTE NLP
 # ==========================================
 @app.get("/ricette")
 def ottieni_ricette():
@@ -345,7 +408,6 @@ def elimina_ricetta(id_ricetta: int):
 async def analizza_documento(file: UploadFile = File(...)):
     percorso_temp = f"temp_{file.filename}"
     try:
-        # 1. Salvataggio e lettura (Uguale a prima)
         with open(percorso_temp, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
             
@@ -364,7 +426,6 @@ async def analizza_documento(file: UploadFile = File(...)):
 
         os.remove(percorso_temp)
 
-        # 2. IL NUOVO PROMPT "MASTRO PANETTIERE" SEVERO
         istruzioni = f"""
         Sei il cervello NLP di un gestionale per panifici. Leggi la seguente ricetta.
         
@@ -375,7 +436,7 @@ async def analizza_documento(file: UploadFile = File(...)):
         Testo ricetta:
         {testo_estratto}
         
-        Devi restituire ESCLUSIVAMENTE questo formato JSON (compilato con i dati trovati):
+        Devi restituire ESCLUSIVAMENTE questo formato JSON:
         {{
           "nome": "Nome prodotto",
           "resa_quantita": 0.0,
@@ -385,12 +446,11 @@ async def analizza_documento(file: UploadFile = File(...)):
         }}
         """
 
-        # 3. CHIAMIAMO LA TUA IA LOCALE (OLLAMA)
         url_ollama = "http://localhost:11434/api/generate"
         payload = {
-            "model": "llama3",
+            "model": "llama3", 
             "prompt": istruzioni,
-            "format": "json", # LA MAGIA: Questo obbliga l'IA a restituire SOLO dati Json perfetti!
+            "format": "json", 
             "stream": False
         }
         
@@ -398,17 +458,13 @@ async def analizza_documento(file: UploadFile = File(...)):
         dati_risposta = risposta_locale.json()
         
         testo_pulito = dati_risposta.get("response", "").strip()
-        
-        # Pulizia extra
         if testo_pulito.startswith("```"):
             testo_pulito = "\n".join(testo_pulito.split("\n")[1:-1])
             
         dati_estratti = json.loads(testo_pulito)
 
-        # 4. SALVATAGGIO DIRETTO IN MYSQL (Identico alla versione precedente)
         conn = get_db_connection()
         cursor = conn.cursor()
-        
         nome_ricetta = dati_estratti.get('nome', 'Ricetta da Documento')
         try:
             resa_kg = float(dati_estratti.get('resa_quantita', 0.0))
@@ -416,16 +472,13 @@ async def analizza_documento(file: UploadFile = File(...)):
             resa_kg = 0.0
             
         query = "INSERT INTO ricette (nome_ricetta, resa_kg, dati_json) VALUES (%s, %s, %s)"
-        valori = (nome_ricetta, resa_kg, json.dumps(dati_estratti))
-        
-        cursor.execute(query, valori)
+        cursor.execute(query, (nome_ricetta, resa_kg, json.dumps(dati_estratti)))
         conn.commit()
         nuovo_id = cursor.lastrowid
         cursor.close()
         conn.close()
         
         dati_estratti['id'] = nuovo_id
-
         return {"successo": True, "messaggio": "Salvata nel DB con Llama 3!", "dati_ia": dati_estratti}
 
     except Exception as e:
@@ -434,76 +487,16 @@ async def analizza_documento(file: UploadFile = File(...)):
         return {"successo": False, "errore": str(e)}
 
 # ==========================================
-# MACCHINARI
+# 8. IL PULSANTE MAGICO: SCHEDULATORE (UNIONE ORDINI E TEAM LIQUIDO)
 # ==========================================
-@app.get("/macchinari")
-def ottieni_macchinari():
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor(dictionary=True) 
-        cursor.execute("SELECT id, nome, tipo, IFNULL(capacita_teglie, 0) AS capacita FROM macchinari")
-        lista_macchinari = cursor.fetchall()
-        cursor.close()
-        conn.close()
-        return {"successo": True, "dati": lista_macchinari}
-    except Exception as e:
-        return {"successo": False, "errore": str(e)}
-
-@app.post("/macchinari")
-def aggiungi_macchinario(macchina: MacchinarioDati):
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        query = "INSERT INTO macchinari (nome, tipo, capacita_teglie) VALUES (%s, %s, %s)"
-        cursor.execute(query, (macchina.nome, macchina.tipo, macchina.capacita))
-        conn.commit()
-        nuovo_id = cursor.lastrowid
-        cursor.close()
-        conn.close()
-        return {"successo": True, "messaggio": "Macchinario aggiunto", "id": nuovo_id}
-    except Exception as e:
-        return {"successo": False, "errore": str(e)}
-
-@app.put("/macchinari/{id_macchina}")
-def modifica_macchinario(id_macchina: int, macchina: MacchinarioDati):
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        query = "UPDATE macchinari SET nome=%s, tipo=%s, capacita_teglie=%s WHERE id=%s"
-        cursor.execute(query, (macchina.nome, macchina.tipo, macchina.capacita, id_macchina))
-        conn.commit()
-        cursor.close()
-        conn.close()
-        return {"successo": True, "messaggio": "Macchinario aggiornato"}
-    except Exception as e:
-        return {"successo": False, "errore": str(e)}
-
-@app.delete("/macchinari/{id_macchina}")
-def elimina_macchinario(id_macchina: int):
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        query = "DELETE FROM macchinari WHERE id=%s"
-        cursor.execute(query, (id_macchina,))
-        conn.commit()
-        cursor.close()
-        conn.close()
-        return {"successo": True, "messaggio": "Macchinario eliminato"}
-    except Exception as e:
-        return {"successo": False, "errore": str(e)}
-
-# ==========================================
-# 7. IL PULSANTE MAGICO: LO SCHEDULATORE IA
-# ==========================================
-@app.get("/calcola_turni")
+@app.post("/calcola_turni")
 def calcola_turni():
     try:
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
 
-        # 1. Filtro: Solo ordini IN ATTESA per DOMANI
         cursor.execute("""
-            SELECT o.id, o.quantita_kg, o.orario_consegna, r.nome_ricetta, r.resa_kg, r.dati_json
+            SELECT o.id, o.quantita_kg, o.orario_consegna, r.id as ricetta_id, r.nome_ricetta, r.resa_kg, r.dati_json
             FROM ordini o 
             JOIN ricette r ON o.ricetta_id = r.id
             WHERE o.stato = 'in_attesa' AND o.data_consegna = CURDATE() + INTERVAL 1 DAY
@@ -513,59 +506,251 @@ def calcola_turni():
         if not ordini_domani:
             return {"successo": True, "messaggio": "Nessun ordine per domani. Il panificio può riposare!", "tabella": []}
 
-        # Recuperiamo i macchinari e il primo turno
-        cursor.execute("SELECT nome FROM macchinari")
-        macchinari = [row['nome'] for row in cursor.fetchall()]
-        cursor.execute("SELECT turno_inizio FROM dipendenti LIMIT 1")
-        dipendente = cursor.fetchone()
+        cursor.execute("SELECT nome, IFNULL(capacita_teglie, 999) as capacita FROM macchinari")
+        macchinari_db = cursor.fetchall()
+        nomi_macchinari = [m['nome'] for m in macchinari_db]
         
-        if not dipendente:
-            return {"successo": False, "errore": "Nessun dipendente trovato per iniziare il turno!"}
+        cursor.execute("SELECT nome, turno_inizio FROM dipendenti")
+        dipendenti_db = cursor.fetchall()
+        nomi_dipendenti = [row['nome'] for row in dipendenti_db]
 
-        inizio_minuti = dipendente['turno_inizio'].total_seconds() // 60
-
-        # ... (Logica OR-Tools per preparare i task) ...
-        # [Per brevità, qui va il motore matematico OR-Tools che avevamo scritto per calcolare le durate]
-        # Simuliamo il risultato del risolutore per concentrarci sulla tua richiesta di Agentic AI:
+        primo_dipendente = dipendenti_db[0] if dipendenti_db else None
         
-        stato = cp_model.OPTIMAL # Sostituisci con il calcolo reale di OR-Tools
+        if not primo_dipendente or not nomi_dipendenti:
+            return {"successo": False, "errore": "Impossibile calcolare: nessun dipendente in turno!"}
 
-        # SCENARIO A: Ottimizzazione Riuscita -> CANCELLAZIONE
+        inizio_minuti_assoluti = primo_dipendente['turno_inizio'].total_seconds() // 60
+
+        # --- NOVITÀ: RAGGRUPPAMENTO ORDINI UGUALI ---
+        # Se ci sono 3 ordini di Ciabatte alle 06:00, li fonde in un unico calcolo di produzione!
+        ordini_raggruppati = {}
+        for o in ordini_domani:
+            chiave = (o['ricetta_id'], str(o['orario_consegna']))
+            if chiave not in ordini_raggruppati:
+                ordini_raggruppati[chiave] = {
+                    'lista_id': [],
+                    'quantita_kg': 0.0,
+                    'orario_consegna': o['orario_consegna'],
+                    'nome_ricetta': o['nome_ricetta'],
+                    'dati_json': o['dati_json']
+                }
+            ordini_raggruppati[chiave]['quantita_kg'] += float(o['quantita_kg'])
+            ordini_raggruppati[chiave]['lista_id'].append(o['id'])
+
+        # --- TRADUZIONE IN BATCH (Infornate) ---
+        tutti_i_task = []
+        orizzonte_massimo = 0
+        KG_PER_TEGLIA = 2.0 
+
+        for chiave, super_ordine in ordini_raggruppati.items():
+            consegna_minuti = super_ordine['orario_consegna'].total_seconds() // 60
+            deadline_relativa = int(consegna_minuti - inizio_minuti_assoluti)
+            if deadline_relativa > orizzonte_massimo:
+                orizzonte_massimo = deadline_relativa
+                
+            totale_teglie = math.ceil(super_ordine['quantita_kg'] / KG_PER_TEGLIA)
+
+            ricetta = json.loads(super_ordine['dati_json'])
+            fasi = ricetta.get('lista_fasi', ricetta.get('fasi', []))
+            
+            capacita_minima = 999 
+            for fase in fasi:
+                macchina_req = fase.get('macchinario', fase.get('macchinario_richiesto', 'Banco di lavoro'))
+                cap_macchina = 999
+                for m in macchinari_db:
+                    if m['nome'] == macchina_req:
+                        cap_macchina = m['capacita']
+                        break
+                if cap_macchina < capacita_minima:
+                    capacita_minima = cap_macchina
+
+            numero_infornate = math.ceil(totale_teglie / capacita_minima) if capacita_minima > 0 else 1
+            
+            for i in range(numero_infornate):
+                batch = []
+                for fase in fasi:
+                    nome_fase = f"{super_ordine['nome_ricetta']} (Lotto {i+1}) - {fase.get('nome_fase', 'Lavorazione')}"
+                    macchina_req = fase.get('macchinario', fase.get('macchinario_richiesto', 'Banco di lavoro'))
+                    durata = int(fase.get('tempo_minuti', 15))
+                    # Salviamo la lista degli ID per poterli cancellare tutti insieme alla fine
+                    batch.append([nome_fase, macchina_req, durata, super_ordine['lista_id']])
+                tutti_i_task.append(batch)
+
+        # --- OR-TOOLS: TEAM LIQUIDO (Tutti fanno tutto) ---
+        modello = cp_model.CpModel()
+        task_temporali = {}
+        task_per_macchina = {macchina: [] for macchina in nomi_macchinari} 
+        task_per_dipendente = {dip: [] for dip in nomi_dipendenti}
+
+        for indice_ordine, batch in enumerate(tutti_i_task):
+            task_temporali[indice_ordine] = []
+            
+            for indice_fase, fase in enumerate(batch):
+                nome_fase, macchinario, durata, lista_id = fase[0], fase[1], fase[2], fase[3]
+                id_task = f"O{indice_ordine}_F{indice_fase}" 
+                
+                inizio = modello.NewIntVar(0, orizzonte_massimo, f'inizio_{id_task}')
+                fine = modello.NewIntVar(0, orizzonte_massimo, f'fine_{id_task}')
+                intervallo_macchina = modello.NewIntervalVar(inizio, durata, fine, f'int_macchina_{id_task}')
+                
+                if macchinario in task_per_macchina:
+                    task_per_macchina[macchinario].append(intervallo_macchina)
+                    
+                assegnamenti_possibili = []
+                variabili_assegnazione_dipendente = {} 
+                
+                # Qualsiasi dipendente libero prende la task
+                for nome_dip in nomi_dipendenti:
+                    dip_assegnato = modello.NewBoolVar(f'assegnato_{nome_dip}_{id_task}')
+                    assegnamenti_possibili.append(dip_assegnato)
+                    variabili_assegnazione_dipendente[nome_dip] = dip_assegnato
+                    
+                    opt_inizio = modello.NewIntVar(0, orizzonte_massimo, f'opt_in_{nome_dip}_{id_task}')
+                    opt_fine = modello.NewIntVar(0, orizzonte_massimo, f'opt_fi_{nome_dip}_{id_task}')
+                    
+                    modello.Add(opt_inizio == inizio).OnlyEnforceIf(dip_assegnato)
+                    modello.Add(opt_fine == fine).OnlyEnforceIf(dip_assegnato)
+                    
+                    intervallo_dip = modello.NewOptionalIntervalVar(opt_inizio, durata, opt_fine, dip_assegnato, f'opt_int_{nome_dip}_{id_task}')
+                    task_per_dipendente[nome_dip].append(intervallo_dip)
+                    
+                modello.AddExactlyOne(assegnamenti_possibili)
+                
+                task_temporali[indice_ordine].append({
+                    'inizio': inizio, 
+                    'fine': fine, 
+                    'nome': nome_fase, 
+                    'macchina': macchinario,
+                    'lista_id': lista_id,
+                    'variabili_dipendenti': variabili_assegnazione_dipendente 
+                })
+
+        for indice_ordine, batch in enumerate(tutti_i_task):
+            for i in range(len(batch) - 1):
+                modello.Add(task_temporali[indice_ordine][i]['fine'] <= task_temporali[indice_ordine][i+1]['inizio'])
+
+        for macchina, intervalli in task_per_macchina.items():
+            if intervalli:
+                modello.AddNoOverlap(intervalli)
+                
+        for dip, intervalli in task_per_dipendente.items():
+            if intervalli:
+                modello.AddNoOverlap(intervalli)
+
+        fine_tutte_infornate = [task_temporali[i][-1]['fine'] for i in range(len(tutti_i_task))]
+        if not fine_tutte_infornate:
+            return {"successo": True, "messaggio": "Nessuna infornata da calcolare.", "tabella": []}
+
+        tempo_massimo = modello.NewIntVar(0, orizzonte_massimo, 'tempo_massimo_totale')
+        modello.AddMaxEquality(tempo_massimo, fine_tutte_infornate)
+        modello.Minimize(tempo_massimo)
+
+        risolutore = cp_model.CpSolver()
+        stato = risolutore.Solve(modello)
+
+        # --- OUTPUT: SUCCESSO E CANCELLAZIONE MULTIPLA ---
         if stato == cp_model.OPTIMAL or stato == cp_model.FEASIBLE:
-            # Qui si genera la tabella_finale
-            tabella_finale = [{"attivita": "Impasto", "macchinario": "Impastatrice", "minuto_inizio": 360, "minuto_fine": 390}] 
+            tabella_finale = []
+            ordini_completati = set()
             
-            # IL NETTURBINO: Elimina gli ordini processati!
-            for ordine in ordini_domani:
-                cursor.execute("DELETE FROM ordini WHERE id = %s", (ordine['id'],))
+            for indice_ordine in range(len(tutti_i_task)):
+                for task in task_temporali[indice_ordine]:
+                    start_time = risolutore.Value(task['inizio'])
+                    end_time = risolutore.Value(task['fine'])
+                    
+                    dipendente_scelto = "Da Assegnare"
+                    for dip, var_assegnazione in task['variabili_dipendenti'].items():
+                        if risolutore.Value(var_assegnazione) == 1:
+                            dipendente_scelto = dip
+                            break
+                    
+                    tabella_finale.append({
+                        "attivita": task['nome'],
+                        "macchinario": task['macchina'],
+                        "dipendente": dipendente_scelto,
+                        "minuto_inizio": start_time,
+                        "minuto_fine": end_time
+                    })
+                    
+                    for id_ord in task['lista_id']:
+                        ordini_completati.add(id_ord)
+            
+            for id_ord in ordini_completati:
+                cursor.execute("DELETE FROM ordini WHERE id = %s", (id_ord,))
             conn.commit()
+            cursor.close()
+            conn.close()
             
-            return {"successo": True, "messaggio": "Tabella generata! Ordini rimossi dal DB.", "tabella": tabella_finale}
+            return {"successo": True, "messaggio": "Tabella generata! Ordini raggruppati e processati.", "tabella": tabella_finale}
         
-        # SCENARIO B: Impossibile -> AUTO-CORREZIONE IA SUI DATI PRE-ESISTENTI
+        # --- OUTPUT: FALLIMENTO & PROMPT INTELLIGENTE ---
         else:
-            ordine_critico = ordini_domani[0] 
-            prompt = f"""
-            L'ordine {ordine_critico['id']} ({ordine_critico['quantita_kg']}kg) non può essere completato in tempo.
-            Posticipa l'orario di consegna di 1 o 2 ore per renderlo fattibile.
-            Restituisci ESCLUSIVAMENTE un JSON: {{"azione": "Testo per l'utente", "nuovo_orario": "HH:MM:SS"}}
+            # Estraiamo l'ordine più problematico (il primo per semplicità)
+            primo_gruppo = list(ordini_raggruppati.values())[0]
+            ids_bloccati = primo_gruppo['lista_id']
+            
+            prompt_generale = f"""
+            Sei l'IA gestionale di un panificio. Il sistema matematico si è bloccato per mancanza di tempo.
+            
+            DATI OPERATIVI (Non inventare nulla):
+            - Ordini bloccati: {primo_gruppo['quantita_kg']} Kg di "{primo_gruppo['nome_ricetta']}".
+            - Team presente: {len(nomi_dipendenti)} dipendenti che lavorano in modalità "team liquido" (tutti fanno tutto).
+            - Macchinari disponibili: {', '.join(nomi_macchinari)}.
+            - Scadenza critica: ore {primo_gruppo['orario_consegna']}.
+            
+            ANALISI:
+            La combinazione di {primo_gruppo['quantita_kg']} Kg con questi forni e {len(nomi_dipendenti)} impiegati non è fisicamente calcolabile entro le {primo_gruppo['orario_consegna']}.
+            
+            AZIONE:
+            Decidi un orario di consegna più tardivo e realistico (es. aggiungendo da 2 a 4 ore in base alla mole di Kg indicata) per sbloccare la produzione.
+            
+            Restituisci ESCLUSIVAMENTE un JSON in questo formato. Niente discorsi, solo codice:
+            {{
+              "azione_fatta": "Spiega brevemente la tua scelta strategica in italiano",
+              "nuovo_orario": "09:00:00"
+            }}
             """
             
-            client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
-            risposta = client.models.generate_content(model='gemini-1.5-flash', contents=prompt)
-            correzione = json.loads(risposta.text.replace("```json", "").replace("```", "").strip())
-            
-            # L'IA MODIFICA IL DATABASE DA SOLA DI DEFAULT
-            cursor.execute(
-                "UPDATE ordini SET orario_consegna = %s WHERE id = %s",
-                (correzione['nuovo_orario'], ordine_critico['id'])
-            )
-            conn.commit()
-            
-            return {
-                "successo": False, 
-                "messaggio": f"🤖 Intervento IA: {correzione['azione']}. Dati aggiornati nel DB, premi di nuovo per ricalcolare!"
-            }
+            try:
+                url_ollama = "http://localhost:11434/api/generate"
+                payload = {
+                    "model": "qwen2.5:1.5b",
+                    "prompt": prompt_generale,
+                    "format": "json", 
+                    "stream": False
+                }
+                
+                risposta_locale = requests.post(url_ollama, json=payload)
+                dati_risposta = risposta_locale.json()
+                
+                testo_json = dati_risposta.get("response", "").strip()
+                correzione = json.loads(testo_json)
+                
+                azione_eseguita = correzione.get('azione_fatta', 'Orario ricalcolato.')
+                nuovo_orario = correzione.get('nuovo_orario', '08:00:00')
+                
+                # Applica il posticipo a TUTTI gli ordini che facevano parte di quel gruppo problematico
+                for id_ord in ids_bloccati:
+                    cursor.execute(
+                        "UPDATE ordini SET orario_consegna = %s WHERE id = %s",
+                        (nuovo_orario, id_ord)
+                    )
+                conn.commit()
+                cursor.close()
+                conn.close()
+                
+                # IL FORMATTING E' CORRETTO: Assegniamo la stringa prima di ritornarla
+                messaggio_ritorno = f"🤖 Intervento IA: {azione_eseguita} (Dati aggiornati, premi Ricalcola Ora!)"
+                
+                return {
+                    "successo": False, 
+                    "messaggio": messaggio_ritorno
+                }
+
+            except Exception as e:
+                print(f"❌ ERRORE IA LOCALE: {e}")
+                return {"successo": False, "errore": str(e)}
 
     except Exception as e:
+        print(f"❌ ERRORE SCHEDULATORE: {e}")
         return {"successo": False, "errore": str(e)}
