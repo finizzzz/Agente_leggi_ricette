@@ -75,30 +75,26 @@ def get_db_connection():
     )
 
 # ==========================================
-# 4. API: ORDINI
+# 4. API: ORDINI, DIPENDENTI, TURNI, MACCHINARI
 # ==========================================
+# [Tutte le rotte standard CRUD rimangono identiche e sicure]
 @app.get("/ordini")
 def ottieni_ordini():
     try:
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
-        query = """
-            SELECT 
-                o.id, o.cliente, o.quantita_kg AS kg, o.orario_consegna AS orario, 
-                o.stato, r.nome_ricetta AS prodotto
-            FROM ordini o
-            LEFT JOIN ricette r ON o.ricetta_id = r.id
-        """
-        cursor.execute(query)
-        lista_ordini = cursor.fetchall()
-        for ordine in lista_ordini:
-            if ordine['orario']:
-                ordine['orario'] = str(ordine['orario'])[:5] 
+        cursor.execute("""
+            SELECT o.id, o.cliente, o.quantita_kg AS kg, o.orario_consegna AS orario, 
+                   o.stato, r.nome_ricetta AS prodotto
+            FROM ordini o LEFT JOIN ricette r ON o.ricetta_id = r.id
+        """)
+        lista = cursor.fetchall()
+        for o in lista:
+            if o['orario']: o['orario'] = str(o['orario'])[:5] 
         cursor.close()
         conn.close()
-        return {"successo": True, "dati": lista_ordini}
-    except Exception as e:
-        return {"successo": False, "errore": str(e)}
+        return {"successo": True, "dati": lista}
+    except Exception as e: return {"successo": False, "errore": str(e)}
 
 @app.post("/ordini")
 def salva_ordine(ordine: NuovoOrdine):
@@ -106,32 +102,28 @@ def salva_ordine(ordine: NuovoOrdine):
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT id FROM ricette WHERE id = %s", (ordine.ricetta_id,))
-        if not cursor.fetchone():
-            return {"successo": False, "errore": "Ricetta non trovata."}
-
-        query = "INSERT INTO ordini (cliente, ricetta_id, quantita_kg, data_consegna, orario_consegna, stato) VALUES (%s, %s, %s, %s, %s, 'in_attesa')"
-        cursor.execute(query, (ordine.cliente, ordine.ricetta_id, ordine.quantita_kg, ordine.data_consegna, ordine.orario_consegna))
+        if not cursor.fetchone(): return {"successo": False, "errore": "Ricetta non trovata."}
+        cursor.execute("INSERT INTO ordini (cliente, ricetta_id, quantita_kg, data_consegna, orario_consegna, stato) VALUES (%s, %s, %s, %s, %s, 'in_attesa')", 
+                       (ordine.cliente, ordine.ricetta_id, ordine.quantita_kg, ordine.data_consegna, ordine.orario_consegna))
         conn.commit() 
-        nuovo_id = cursor.lastrowid
+        nid = cursor.lastrowid
         cursor.close()
         conn.close()
-        return {"successo": True, "messaggio": f"Ordine {nuovo_id} salvato correttamente!"}
-    except Exception as e:
-        return {"successo": False, "errore": str(e)}
+        return {"successo": True, "messaggio": f"Ordine {nid} salvato!"}
+    except Exception as e: return {"successo": False, "errore": str(e)}
 
 @app.put("/ordini/{id_ordine}")
 def modifica_ordine(id_ordine: int, ordine: NuovoOrdine):
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        query = "UPDATE ordini SET cliente=%s, ricetta_id=%s, quantita_kg=%s, data_consegna=%s, orario_consegna=%s WHERE id=%s"
-        cursor.execute(query, (ordine.cliente, ordine.ricetta_id, ordine.quantita_kg, ordine.data_consegna, ordine.orario_consegna, id_ordine))
+        cursor.execute("UPDATE ordini SET cliente=%s, ricetta_id=%s, quantita_kg=%s, data_consegna=%s, orario_consegna=%s WHERE id=%s", 
+                       (ordine.cliente, ordine.ricetta_id, ordine.quantita_kg, ordine.data_consegna, ordine.orario_consegna, id_ordine))
         conn.commit()
         cursor.close()
         conn.close()
         return {"successo": True, "messaggio": "Ordine aggiornato"}
-    except Exception as e:
-        return {"successo": False, "errore": str(e)}
+    except Exception as e: return {"successo": False, "errore": str(e)}
 
 @app.delete("/ordini/{id_ordine}")
 def elimina_ordine(id_ordine: int):
@@ -143,56 +135,49 @@ def elimina_ordine(id_ordine: int):
         cursor.close()
         conn.close()
         return {"successo": True, "messaggio": "Ordine eliminato"}
-    except Exception as e:
-        return {"successo": False, "errore": str(e)}
+    except Exception as e: return {"successo": False, "errore": str(e)}
 
-# ==========================================
-# 5. API: DIPENDENTI E TURNI
-# ==========================================
 @app.get("/dipendenti")
 def ottieni_dipendenti():
     try:
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
         cursor.execute("SELECT * FROM dipendenti")
-        lista_dipendenti = cursor.fetchall()
-        for dip in lista_dipendenti:
-            dip['turno_inizio'] = str(dip['turno_inizio'])
-            dip['turno_fine'] = str(dip['turno_fine'])
+        lista = cursor.fetchall()
+        for d in lista:
+            d['turno_inizio'] = str(d['turno_inizio'])
+            d['turno_fine'] = str(d['turno_fine'])
         cursor.close()
         conn.close()
-        return {"successo": True, "dati": lista_dipendenti}
-    except Exception as e:
-        return {"successo": False, "errore": str(e)}
+        return {"successo": True, "dati": lista}
+    except Exception as e: return {"successo": False, "errore": str(e)}
 
 @app.post("/dipendenti")
 def aggiungi_dipendente(dipendente: DipendenteDati):
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        query = "INSERT INTO dipendenti (nome, ruolo, turno_inizio, turno_fine) VALUES (%s, %s, %s, %s)"
-        cursor.execute(query, (dipendente.nome, dipendente.ruolo, dipendente.turno_inizio, dipendente.turno_fine))
+        cursor.execute("INSERT INTO dipendenti (nome, ruolo, turno_inizio, turno_fine) VALUES (%s, %s, %s, %s)", 
+                       (dipendente.nome, dipendente.ruolo, dipendente.turno_inizio, dipendente.turno_fine))
         conn.commit()
-        nuovo_id = cursor.lastrowid
+        nid = cursor.lastrowid
         cursor.close()
         conn.close()
-        return {"successo": True, "messaggio": "Dipendente aggiunto", "id": nuovo_id}
-    except Exception as e:
-        return {"successo": False, "errore": str(e)}
+        return {"successo": True, "id": nid}
+    except Exception as e: return {"successo": False, "errore": str(e)}
 
 @app.put("/dipendenti/{id_dipendente}")
 def modifica_dipendente(id_dipendente: int, dipendente: DipendenteDati):
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        query = "UPDATE dipendenti SET nome=%s, ruolo=%s, turno_inizio=%s, turno_fine=%s WHERE id=%s"
-        cursor.execute(query, (dipendente.nome, dipendente.ruolo, dipendente.turno_inizio, dipendente.turno_fine, id_dipendente))
+        cursor.execute("UPDATE dipendenti SET nome=%s, ruolo=%s, turno_inizio=%s, turno_fine=%s WHERE id=%s", 
+                       (dipendente.nome, dipendente.ruolo, dipendente.turno_inizio, dipendente.turno_fine, id_dipendente))
         conn.commit()
         cursor.close()
         conn.close()
-        return {"successo": True, "messaggio": "Dipendente aggiornato"}
-    except Exception as e:
-        return {"successo": False, "errore": str(e)}
+        return {"successo": True, "messaggio": "Aggiornato"}
+    except Exception as e: return {"successo": False, "errore": str(e)}
 
 @app.delete("/dipendenti/{id_dipendente}")
 def elimina_dipendente(id_dipendente: int):
@@ -203,9 +188,8 @@ def elimina_dipendente(id_dipendente: int):
         conn.commit()
         cursor.close()
         conn.close()
-        return {"successo": True, "messaggio": "Dipendente eliminato"}
-    except Exception as e:
-        return {"successo": False, "errore": str(e)}
+        return {"successo": True}
+    except Exception as e: return {"successo": False, "errore": str(e)}
 
 @app.get("/turni")
 def ottieni_turni():
@@ -213,64 +197,52 @@ def ottieni_turni():
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
         cursor.execute("SELECT * FROM turni_calendario")
-        lista_turni = cursor.fetchall()
-        for turno in lista_turni:
-            turno['data_turno'] = str(turno['data_turno'])
+        lista = cursor.fetchall()
+        for t in lista: t['data_turno'] = str(t['data_turno'])
         cursor.close()
         conn.close()
-        return {"successo": True, "dati": lista_turni}
-    except Exception as e:
-        return {"successo": False, "errore": str(e)}
+        return {"successo": True, "dati": lista}
+    except Exception as e: return {"successo": False, "errore": str(e)}
 
 @app.post("/turni")
 def aggiungi_turno(turno: TurnoDati):
     try:
         data_mysql = turno.data_turno
         if "/" in data_mysql:
-            try:
-                dt = datetime.strptime(data_mysql, "%m/%d/%Y")
-                data_mysql = dt.strftime("%Y-%m-%d")
-            except ValueError:
+            for fmt in ("%m/%d/%Y", "%d/%m/%Y"):
                 try:
-                    dt = datetime.strptime(data_mysql, "%d/%m/%Y")
-                    data_mysql = dt.strftime("%Y-%m-%d")
-                except ValueError:
-                    pass
+                    data_mysql = datetime.strptime(data_mysql, fmt).strftime("%Y-%m-%d")
+                    break
+                except ValueError: pass
         conn = get_db_connection()
         cursor = conn.cursor()
-        query = "INSERT INTO turni_calendario (data_turno, tipo, dipendente, ruolo_dipendente, cliente, orario) VALUES (%s, %s, %s, %s, %s, %s)"
-        cursor.execute(query, (data_mysql, turno.tipo, turno.dipendente, turno.ruolo_dipendente, turno.cliente, turno.orario))
+        cursor.execute("INSERT INTO turni_calendario (data_turno, tipo, dipendente, ruolo_dipendente, cliente, orario) VALUES (%s, %s, %s, %s, %s, %s)", 
+                       (data_mysql, turno.tipo, turno.dipendente, turno.ruolo_dipendente, turno.cliente, turno.orario))
         conn.commit()
         cursor.close()
         conn.close()
-        return {"successo": True, "messaggio": "Turno salvato"}
-    except Exception as e:
-        return {"successo": False, "errore": str(e)}
+        return {"successo": True}
+    except Exception as e: return {"successo": False, "errore": str(e)}
 
 @app.put("/turni/{id_turno}")
 def modifica_turno(id_turno: int, turno: TurnoDati):
     try:
         data_mysql = turno.data_turno
         if "/" in data_mysql:
-            try:
-                dt = datetime.strptime(data_mysql, "%m/%d/%Y")
-                data_mysql = dt.strftime("%Y-%m-%d")
-            except ValueError:
+            for fmt in ("%m/%d/%Y", "%d/%m/%Y"):
                 try:
-                    dt = datetime.strptime(data_mysql, "%d/%m/%Y")
-                    data_mysql = dt.strftime("%Y-%m-%d")
-                except ValueError:
-                    pass
+                    data_mysql = datetime.strptime(data_mysql, fmt).strftime("%Y-%m-%d")
+                    break
+                except ValueError: pass
         conn = get_db_connection()
         cursor = conn.cursor()
-        query = "UPDATE turni_calendario SET data_turno=%s, tipo=%s, dipendente=%s, ruolo_dipendente=%s, cliente=%s, orario=%s WHERE id=%s"
-        cursor.execute(query, (data_mysql, turno.tipo, turno.dipendente, turno.ruolo_dipendente, turno.cliente, turno.orario, id_turno))
+        cursor.execute("UPDATE turni_calendario SET data_turno=%s, tipo=%s, dipendente=%s, ruolo_dipendente=%s, cliente=%s, orario=%s WHERE id=%s", 
+                       (data_mysql, turno.tipo, turno.dipendente, turno.ruolo_dipendente, turno.cliente, turno.orario, id_turno))
         conn.commit()
         cursor.close()
         conn.close()
-        return {"successo": True, "messaggio": "Turno aggiornato"}
-    except Exception as e:
-        return {"successo": False, "errore": str(e)}
+        return {"successo": True}
+    except Exception as e: return {"successo": False, "errore": str(e)}
 
 @app.delete("/turni/{id_turno}")
 def elimina_turno(id_turno: int):
@@ -281,54 +253,47 @@ def elimina_turno(id_turno: int):
         conn.commit()
         cursor.close()
         conn.close()
-        return {"successo": True, "messaggio": "Turno eliminato"}
-    except Exception as e:
-        return {"successo": False, "errore": str(e)}
+        return {"successo": True}
+    except Exception as e: return {"successo": False, "errore": str(e)}
 
-# ==========================================
-# 6. API: MACCHINARI
-# ==========================================
 @app.get("/macchinari")
 def ottieni_macchinari():
     try:
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True) 
         cursor.execute("SELECT id, nome, tipo, IFNULL(capacita_teglie, 999) AS capacita FROM macchinari")
-        lista_macchinari = cursor.fetchall()
+        lista = cursor.fetchall()
         cursor.close()
         conn.close()
-        return {"successo": True, "dati": lista_macchinari}
-    except Exception as e:
-        return {"successo": False, "errore": str(e)}
+        return {"successo": True, "dati": lista}
+    except Exception as e: return {"successo": False, "errore": str(e)}
 
 @app.post("/macchinari")
 def aggiungi_macchinario(macchina: MacchinarioDati):
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        query = "INSERT INTO macchinari (nome, tipo, capacita_teglie) VALUES (%s, %s, %s)"
-        cursor.execute(query, (macchina.nome, macchina.tipo, macchina.capacita))
+        cursor.execute("INSERT INTO macchinari (nome, tipo, capacita_teglie) VALUES (%s, %s, %s)", 
+                       (macchina.nome, macchina.tipo, macchina.capacita))
         conn.commit()
-        nuovo_id = cursor.lastrowid
+        nid = cursor.lastrowid
         cursor.close()
         conn.close()
-        return {"successo": True, "messaggio": "Macchinario aggiunto", "id": nuovo_id}
-    except Exception as e:
-        return {"successo": False, "errore": str(e)}
+        return {"successo": True, "id": nid}
+    except Exception as e: return {"successo": False, "errore": str(e)}
 
 @app.put("/macchinari/{id_macchina}")
 def modifica_macchinario(id_macchina: int, macchina: MacchinarioDati):
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        query = "UPDATE macchinari SET nome=%s, tipo=%s, capacita_teglie=%s WHERE id=%s"
-        cursor.execute(query, (macchina.nome, macchina.tipo, macchina.capacita, id_macchina))
+        cursor.execute("UPDATE macchinari SET nome=%s, tipo=%s, capacita_teglie=%s WHERE id=%s", 
+                       (macchina.nome, macchina.tipo, macchina.capacita, id_macchina))
         conn.commit()
         cursor.close()
         conn.close()
-        return {"successo": True, "messaggio": "Macchinario aggiornato"}
-    except Exception as e:
-        return {"successo": False, "errore": str(e)}
+        return {"successo": True}
+    except Exception as e: return {"successo": False, "errore": str(e)}
 
 @app.delete("/macchinari/{id_macchina}")
 def elimina_macchinario(id_macchina: int):
@@ -339,57 +304,50 @@ def elimina_macchinario(id_macchina: int):
         conn.commit()
         cursor.close()
         conn.close()
-        return {"successo": True, "messaggio": "Macchinario eliminato"}
-    except Exception as e:
-        return {"successo": False, "errore": str(e)}
+        return {"successo": True}
+    except Exception as e: return {"successo": False, "errore": str(e)}
 
-# ==========================================
-# 7. API: RICETTE E AGENTE NLP
-# ==========================================
 @app.get("/ricette")
 def ottieni_ricette():
     try:
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
         cursor.execute("SELECT * FROM ricette")
-        lista_ricette = cursor.fetchall()
-        for ricetta in lista_ricette:
-            if isinstance(ricetta['dati_json'], str):
-                ricetta['dati_json'] = json.loads(ricetta['dati_json'])
+        lista = cursor.fetchall()
+        for r in lista:
+            if isinstance(r['dati_json'], str):
+                r['dati_json'] = json.loads(r['dati_json'])
         cursor.close()
         conn.close()
-        return {"successo": True, "dati": lista_ricette}
-    except Exception as e:
-        return {"successo": False, "errore": str(e)}
+        return {"successo": True, "dati": lista}
+    except Exception as e: return {"successo": False, "errore": str(e)}
 
 @app.post("/ricette")
 def aggiungi_ricetta(ricetta: RicettaDati):
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        query = "INSERT INTO ricette (nome_ricetta, resa_kg, dati_json) VALUES (%s, %s, %s)"
-        cursor.execute(query, (ricetta.nome_ricetta, ricetta.resa_kg, json.dumps(ricetta.dati_json)))
+        cursor.execute("INSERT INTO ricette (nome_ricetta, resa_kg, dati_json) VALUES (%s, %s, %s)", 
+                       (ricetta.nome_ricetta, ricetta.resa_kg, json.dumps(ricetta.dati_json)))
         conn.commit()
-        nuovo_id = cursor.lastrowid
+        nid = cursor.lastrowid
         cursor.close()
         conn.close()
-        return {"successo": True, "messaggio": "Ricetta aggiunta", "id": nuovo_id}
-    except Exception as e:
-        return {"successo": False, "errore": str(e)}
+        return {"successo": True, "id": nid}
+    except Exception as e: return {"successo": False, "errore": str(e)}
 
 @app.put("/ricette/{id_ricetta}")
 def modifica_ricetta(id_ricetta: int, ricetta: RicettaDati):
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        query = "UPDATE ricette SET nome_ricetta=%s, resa_kg=%s, dati_json=%s WHERE id=%s"
-        cursor.execute(query, (ricetta.nome_ricetta, ricetta.resa_kg, json.dumps(ricetta.dati_json), id_ricetta))
+        cursor.execute("UPDATE ricette SET nome_ricetta=%s, resa_kg=%s, dati_json=%s WHERE id=%s", 
+                       (ricetta.nome_ricetta, ricetta.resa_kg, json.dumps(ricetta.dati_json), id_ricetta))
         conn.commit()
         cursor.close()
         conn.close()
-        return {"successo": True, "messaggio": "Ricetta aggiornata"}
-    except Exception as e:
-        return {"successo": False, "errore": str(e)}
+        return {"successo": True}
+    except Exception as e: return {"successo": False, "errore": str(e)}
 
 @app.delete("/ricette/{id_ricetta}")
 def elimina_ricetta(id_ricetta: int):
@@ -400,10 +358,13 @@ def elimina_ricetta(id_ricetta: int):
         conn.commit()
         cursor.close()
         conn.close()
-        return {"successo": True, "messaggio": "Ricetta eliminata"}
-    except Exception as e:
-        return {"successo": False, "errore": str(e)}
+        return {"successo": True}
+    except Exception as e: return {"successo": False, "errore": str(e)}
 
+
+# ==========================================
+# 5. AGENTE NLP: LETTORE DI DOCUMENTI POTENZIATO
+# ==========================================
 @app.post("/analizza_documento")
 async def analizza_documento(file: UploadFile = File(...)):
     percorso_temp = f"temp_{file.filename}"
@@ -426,23 +387,32 @@ async def analizza_documento(file: UploadFile = File(...)):
 
         os.remove(percorso_temp)
 
+        # IL NUOVO PROMPT ASSOLUTO: Crea le istruzioni operative per il KDS!
         istruzioni = f"""
-        Sei il cervello NLP di un gestionale per panifici. Leggi la seguente ricetta.
+        Sei il cervello NLP di un gestionale per panifici. Analizza questa ricetta.
         
         REGOLE FERREE:
-        1. Quantità: Usa SOLO numeri (es. 500, 1.5). Non scrivere lettere nella quantità.
-        2. Macchinari: Per "macchinario" DEVI usare ESCLUSIVAMENTE uno di questi: "Impastatrice a spirale", "Forno a piani", "Cella di lievitazione", "Banco di lavoro".
+        1. Quantità: Usa SOLO numeri. Non scrivere lettere nella quantità.
+        2. Macchinari: DEVI usare ESCLUSIVAMENTE uno di questi: "Impastatrice a spirale", "Forno a piani", "Cella di lievitazione", "Banco di lavoro".
+        3. DESCRIZIONE OPERATIVA: Questa è la cosa più importante. Per OGNI fase, scrivi una "descrizione_operativa" ricchissima di dettagli. Il panettiere leggerà questa descrizione sul tablet mentre lavora. Deve contenere: quantità di ingredienti da inserire in quella fase specifica, velocità della macchina, temperature, consigli pratici estratti dal testo.
         
         Testo ricetta:
         {testo_estratto}
         
-        Devi restituire ESCLUSIVAMENTE questo formato JSON:
+        Devi restituire ESCLUSIVAMENTE un JSON con questa esatta struttura:
         {{
           "nome": "Nome prodotto",
           "resa_quantita": 0.0,
           "resa_unita": "Kg o Pz",
           "lista_ingredienti": [{{"nome": "...", "quantita": 0.0, "unita": "g, Kg, ml, L o Pz"}}],
-          "lista_fasi": [{{"nome_fase": "...", "macchinario": "...", "tempo_minuti": 0}}]
+          "lista_fasi": [
+            {{
+              "nome_fase": "...", 
+              "macchinario": "...", 
+              "tempo_minuti": 0,
+              "descrizione_operativa": "Testo molto descrittivo per il fornaio. Es: 'Versare 5Kg di farina e 3L di acqua. Azionare la spirale a vel. 1 per 5 min. Temperatura ideale 24°C.'"
+            }}
+          ]
         }}
         """
 
@@ -463,6 +433,7 @@ async def analizza_documento(file: UploadFile = File(...)):
             
         dati_estratti = json.loads(testo_pulito)
 
+        # Salvataggio diretto
         conn = get_db_connection()
         cursor = conn.cursor()
         nome_ricetta = dati_estratti.get('nome', 'Ricetta da Documento')
@@ -486,8 +457,9 @@ async def analizza_documento(file: UploadFile = File(...)):
             os.remove(percorso_temp)
         return {"successo": False, "errore": str(e)}
 
+
 # ==========================================
-# 8. IL PULSANTE MAGICO: SCHEDULATORE (UNIONE ORDINI E TEAM LIQUIDO)
+# 6. IL PULSANTE MAGICO: SCHEDULATORE (UNIONE ORDINI, TEAM LIQUIDO E ISTRUZIONI)
 # ==========================================
 @app.post("/calcola_turni")
 def calcola_turni():
@@ -497,12 +469,10 @@ def calcola_turni():
 
         cursor.execute("""
             SELECT o.id, o.quantita_kg, o.orario_consegna, r.id as ricetta_id, r.nome_ricetta, r.resa_kg, r.dati_json
-            FROM ordini o 
-            JOIN ricette r ON o.ricetta_id = r.id
+            FROM ordini o JOIN ricette r ON o.ricetta_id = r.id
             WHERE o.stato = 'in_attesa' AND o.data_consegna = CURDATE() + INTERVAL 1 DAY
         """)
         ordini_domani = cursor.fetchall()
-        
         if not ordini_domani:
             return {"successo": True, "messaggio": "Nessun ordine per domani. Il panificio può riposare!", "tabella": []}
 
@@ -515,21 +485,18 @@ def calcola_turni():
         nomi_dipendenti = [row['nome'] for row in dipendenti_db]
 
         primo_dipendente = dipendenti_db[0] if dipendenti_db else None
-        
         if not primo_dipendente or not nomi_dipendenti:
             return {"successo": False, "errore": "Impossibile calcolare: nessun dipendente in turno!"}
 
         inizio_minuti_assoluti = primo_dipendente['turno_inizio'].total_seconds() // 60
 
-        # --- NOVITÀ: RAGGRUPPAMENTO ORDINI UGUALI ---
-        # Se ci sono 3 ordini di Ciabatte alle 06:00, li fonde in un unico calcolo di produzione!
+        # RAGGRUPPAMENTO ORDINI UGUALI
         ordini_raggruppati = {}
         for o in ordini_domani:
             chiave = (o['ricetta_id'], str(o['orario_consegna']))
             if chiave not in ordini_raggruppati:
                 ordini_raggruppati[chiave] = {
-                    'lista_id': [],
-                    'quantita_kg': 0.0,
+                    'lista_id': [], 'quantita_kg': 0.0,
                     'orario_consegna': o['orario_consegna'],
                     'nome_ricetta': o['nome_ricetta'],
                     'dati_json': o['dati_json']
@@ -537,7 +504,7 @@ def calcola_turni():
             ordini_raggruppati[chiave]['quantita_kg'] += float(o['quantita_kg'])
             ordini_raggruppati[chiave]['lista_id'].append(o['id'])
 
-        # --- TRADUZIONE IN BATCH (Infornate) ---
+        # TRADUZIONE IN BATCH (Infornate) con TRASPORTO ISTRUZIONI
         tutti_i_task = []
         orizzonte_massimo = 0
         KG_PER_TEGLIA = 2.0 
@@ -561,8 +528,7 @@ def calcola_turni():
                     if m['nome'] == macchina_req:
                         cap_macchina = m['capacita']
                         break
-                if cap_macchina < capacita_minima:
-                    capacita_minima = cap_macchina
+                if cap_macchina < capacita_minima: capacita_minima = cap_macchina
 
             numero_infornate = math.ceil(totale_teglie / capacita_minima) if capacita_minima > 0 else 1
             
@@ -572,11 +538,13 @@ def calcola_turni():
                     nome_fase = f"{super_ordine['nome_ricetta']} (Lotto {i+1}) - {fase.get('nome_fase', 'Lavorazione')}"
                     macchina_req = fase.get('macchinario', fase.get('macchinario_richiesto', 'Banco di lavoro'))
                     durata = int(fase.get('tempo_minuti', 15))
-                    # Salviamo la lista degli ID per poterli cancellare tutti insieme alla fine
-                    batch.append([nome_fase, macchina_req, durata, super_ordine['lista_id']])
+                    # RECUPERIAMO LA DESCRIZIONE OPERATIVA! (Se non c'è, mettiamo un testo di default)
+                    descrizione = fase.get('descrizione_operativa', 'Procedere secondo il manuale standard.')
+                    
+                    batch.append([nome_fase, macchina_req, durata, super_ordine['lista_id'], descrizione])
                 tutti_i_task.append(batch)
 
-        # --- OR-TOOLS: TEAM LIQUIDO (Tutti fanno tutto) ---
+        # OR-TOOLS: TEAM LIQUIDO 
         modello = cp_model.CpModel()
         task_temporali = {}
         task_per_macchina = {macchina: [] for macchina in nomi_macchinari} 
@@ -586,7 +554,7 @@ def calcola_turni():
             task_temporali[indice_ordine] = []
             
             for indice_fase, fase in enumerate(batch):
-                nome_fase, macchinario, durata, lista_id = fase[0], fase[1], fase[2], fase[3]
+                nome_fase, macchinario, durata, lista_id, descrizione = fase[0], fase[1], fase[2], fase[3], fase[4]
                 id_task = f"O{indice_ordine}_F{indice_fase}" 
                 
                 inizio = modello.NewIntVar(0, orizzonte_massimo, f'inizio_{id_task}')
@@ -599,7 +567,6 @@ def calcola_turni():
                 assegnamenti_possibili = []
                 variabili_assegnazione_dipendente = {} 
                 
-                # Qualsiasi dipendente libero prende la task
                 for nome_dip in nomi_dipendenti:
                     dip_assegnato = modello.NewBoolVar(f'assegnato_{nome_dip}_{id_task}')
                     assegnamenti_possibili.append(dip_assegnato)
@@ -622,6 +589,7 @@ def calcola_turni():
                     'nome': nome_fase, 
                     'macchina': macchinario,
                     'lista_id': lista_id,
+                    'descrizione': descrizione, # <--- TRASPORTIAMO LA DESCRIZIONE FINO ALLA FINE!
                     'variabili_dipendenti': variabili_assegnazione_dipendente 
                 })
 
@@ -630,12 +598,10 @@ def calcola_turni():
                 modello.Add(task_temporali[indice_ordine][i]['fine'] <= task_temporali[indice_ordine][i+1]['inizio'])
 
         for macchina, intervalli in task_per_macchina.items():
-            if intervalli:
-                modello.AddNoOverlap(intervalli)
+            if intervalli: modello.AddNoOverlap(intervalli)
                 
         for dip, intervalli in task_per_dipendente.items():
-            if intervalli:
-                modello.AddNoOverlap(intervalli)
+            if intervalli: modello.AddNoOverlap(intervalli)
 
         fine_tutte_infornate = [task_temporali[i][-1]['fine'] for i in range(len(tutti_i_task))]
         if not fine_tutte_infornate:
@@ -666,14 +632,13 @@ def calcola_turni():
                     
                     tabella_finale.append({
                         "attivita": task['nome'],
+                        "descrizione_operativa": task['descrizione'], # <--- ECCOLA! PRONTA PER IL TABLET
                         "macchinario": task['macchina'],
                         "dipendente": dipendente_scelto,
                         "minuto_inizio": start_time,
                         "minuto_fine": end_time
                     })
-                    
-                    for id_ord in task['lista_id']:
-                        ordini_completati.add(id_ord)
+                    for id_ord in task['lista_id']: ordini_completati.add(id_ord)
             
             for id_ord in ordini_completati:
                 cursor.execute("DELETE FROM ordini WHERE id = %s", (id_ord,))
@@ -681,76 +646,35 @@ def calcola_turni():
             cursor.close()
             conn.close()
             
-            return {"successo": True, "messaggio": "Tabella generata! Ordini raggruppati e processati.", "tabella": tabella_finale}
+            return {"successo": True, "messaggio": "Tabella generata!", "tabella": tabella_finale}
         
         # --- OUTPUT: FALLIMENTO & PROMPT INTELLIGENTE ---
         else:
-            # Estraiamo l'ordine più problematico (il primo per semplicità)
             primo_gruppo = list(ordini_raggruppati.values())[0]
             ids_bloccati = primo_gruppo['lista_id']
             
             prompt_generale = f"""
             Sei l'IA gestionale di un panificio. Il sistema matematico si è bloccato per mancanza di tempo.
-            
-            DATI OPERATIVI (Non inventare nulla):
-            - Ordini bloccati: {primo_gruppo['quantita_kg']} Kg di "{primo_gruppo['nome_ricetta']}".
-            - Team presente: {len(nomi_dipendenti)} dipendenti che lavorano in modalità "team liquido" (tutti fanno tutto).
-            - Macchinari disponibili: {', '.join(nomi_macchinari)}.
-            - Scadenza critica: ore {primo_gruppo['orario_consegna']}.
-            
-            ANALISI:
-            La combinazione di {primo_gruppo['quantita_kg']} Kg con questi forni e {len(nomi_dipendenti)} impiegati non è fisicamente calcolabile entro le {primo_gruppo['orario_consegna']}.
-            
-            AZIONE:
-            Decidi un orario di consegna più tardivo e realistico (es. aggiungendo da 2 a 4 ore in base alla mole di Kg indicata) per sbloccare la produzione.
-            
-            Restituisci ESCLUSIVAMENTE un JSON in questo formato. Niente discorsi, solo codice:
-            {{
-              "azione_fatta": "Spiega brevemente la tua scelta strategica in italiano",
-              "nuovo_orario": "09:00:00"
-            }}
+            DATI: {primo_gruppo['quantita_kg']} Kg di "{primo_gruppo['nome_ricetta']}". {len(nomi_dipendenti)} dipendenti. Macchine: {', '.join(nomi_macchinari)}. Scadenza: ore {primo_gruppo['orario_consegna']}.
+            Decidi un orario di consegna realistico per sbloccare la produzione. Restituisci SOLO JSON:
+            {{ "azione_fatta": "Spiega la scelta...", "nuovo_orario": "09:00:00" }}
             """
-            
             try:
                 url_ollama = "http://localhost:11434/api/generate"
-                payload = {
-                    "model": "qwen2.5:1.5b",
-                    "prompt": prompt_generale,
-                    "format": "json", 
-                    "stream": False
-                }
-                
+                payload = { "model": "qwen2.5:1.5b", "prompt": prompt_generale, "format": "json", "stream": False }
                 risposta_locale = requests.post(url_ollama, json=payload)
                 dati_risposta = risposta_locale.json()
-                
-                testo_json = dati_risposta.get("response", "").strip()
-                correzione = json.loads(testo_json)
+                correzione = json.loads(dati_risposta.get("response", "").strip())
                 
                 azione_eseguita = correzione.get('azione_fatta', 'Orario ricalcolato.')
                 nuovo_orario = correzione.get('nuovo_orario', '08:00:00')
                 
-                # Applica il posticipo a TUTTI gli ordini che facevano parte di quel gruppo problematico
                 for id_ord in ids_bloccati:
-                    cursor.execute(
-                        "UPDATE ordini SET orario_consegna = %s WHERE id = %s",
-                        (nuovo_orario, id_ord)
-                    )
+                    cursor.execute("UPDATE ordini SET orario_consegna = %s WHERE id = %s", (nuovo_orario, id_ord))
                 conn.commit()
                 cursor.close()
                 conn.close()
-                
-                # IL FORMATTING E' CORRETTO: Assegniamo la stringa prima di ritornarla
-                messaggio_ritorno = f"🤖 Intervento IA: {azione_eseguita} (Dati aggiornati, premi Ricalcola Ora!)"
-                
-                return {
-                    "successo": False, 
-                    "messaggio": messaggio_ritorno
-                }
+                return {"successo": False, "messaggio": f"🤖 Intervento IA: {azione_eseguita} (Dati aggiornati, premi Ricalcola Ora!)"}
+            except Exception as e: return {"successo": False, "errore": str(e)}
 
-            except Exception as e:
-                print(f"❌ ERRORE IA LOCALE: {e}")
-                return {"successo": False, "errore": str(e)}
-
-    except Exception as e:
-        print(f"❌ ERRORE SCHEDULATORE: {e}")
-        return {"successo": False, "errore": str(e)}
+    except Exception as e: return {"successo": False, "errore": str(e)}
